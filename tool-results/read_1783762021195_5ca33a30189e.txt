@@ -1,0 +1,733 @@
+     1→"use client";
+     2→
+     3→import * as React from "react";
+     4→import { motion } from "framer-motion";
+     5→import { cn } from "@/lib/utils";
+     6→import { Button } from "@/components/ui/button";
+     7→import { Card } from "@/components/ui/card";
+     8→import { Badge } from "@/components/ui/badge";
+     9→import {
+    10→  ChevronLeft,
+    11→  ChevronRight,
+    12→  AlertTriangle,
+    13→  Pill,
+    14→  Beaker,
+    15→  Activity,
+    16→  HeartPulse,
+    17→  Ban,
+    18→  Thermometer,
+    19→  ExternalLink,
+    20→  Flag,
+    21→  ShieldAlert,
+    22→  Info,
+    23→  ClipboardList,
+    24→  Share2,
+    25→  Clock,
+    26→  FlaskConical,
+    27→  Droplet,
+    28→  Utensils,
+    29→  Baby,
+    30→  Skull,
+    31→  PillBottle,
+    32→  Network,
+    33→} from "lucide-react";
+    34→import { useAppStore } from "@/lib/store";
+    35→import {
+    36→  ConfidenceBadge,
+    37→  FormIcon,
+    38→  formLabel,
+    39→  MedicineThumb,
+    40→} from "@/components/medicine/primitives";
+    41→import type { MedicineResult } from "@/lib/types";
+    42→import { ReportDialog } from "@/components/medicine/report-dialog";
+    43→
+    44→export function ResultsScreen() {
+    45→  const navigate = useAppStore((s) => s.navigate);
+    46→  const goBack = useAppStore((s) => s.goBack);
+    47→  const result = useAppStore((s) => s.currentResult);
+    48→  const scans = useAppStore((s) => s.scans);
+    49→  const currentScanId = useAppStore((s) => s.currentScanId);
+    50→  const setActiveDetailSection = useAppStore((s) => s.setActiveDetailSection);
+    51→  const allergies = useAppStore((s) => s.profile.allergies) ?? [];
+    52→
+    53→  const [reportOpen, setReportOpen] = React.useState(false);
+    54→
+    55→  if (!result) {
+    56→    return (
+    57→      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+    58→        <p className="text-sm text-muted-foreground">No result to show.</p>
+    59→        <Button onClick={() => navigate("home")} className="mt-4">
+    60→          Go home
+    61→        </Button>
+    62→      </div>
+    63→    );
+    64→  }
+    65→
+    66→  const savedScan = currentScanId ? scans.find((s) => s.id === currentScanId) : undefined;
+    67→  const photos = savedScan?.photos ?? [];
+    68→
+    69→  const isHighRisk =
+    70→    result.highRisk ||
+    71→    result.controlledSubstance ||
+    72→    result.seriousSideEffects.length > 0;
+    73→
+    74→  const allergyHits = allergies.filter((a) =>
+    75→    result.activeIngredients.some((ing) =>
+    76→      ing.toLowerCase().includes(a.toLowerCase())
+    77→    )
+    78→  );
+    79→
+    80→  return (
+    81→    <div className="flex flex-col gap-4 py-2 md:gap-6 md:py-4">
+    82→      {/* Top bar */}
+    83→      <div className="flex items-center justify-between">
+    84→        <button
+    85→          onClick={goBack}
+    86→          className="flex h-9 w-9 items-center justify-center rounded-full bg-card shadow-soft"
+    87→          aria-label="Back"
+    88→        >
+    89→          <ChevronLeft className="h-5 w-5" />
+    90→        </button>
+    91→        <div className="flex items-center gap-2">
+    92→          <Button
+    93→            variant="ghost"
+    94→            size="sm"
+    95→            className="h-9 rounded-full px-3 text-muted-foreground"
+    96→            onClick={() => {
+    97→              if (typeof navigator !== "undefined" && navigator.share) {
+    98→                navigator
+    99→                  .share({
+   100→                    title: result.brandName,
+   101→                    text: `${result.brandName} (${result.genericName}) — ${result.strengthDisplay}`,
+   102→                  })
+   103→                  .catch(() => {});
+   104→              }
+   105→            }}
+   106→          >
+   107→            <Share2 className="h-4 w-4" />
+   108→            <span className="ml-1 hidden sm:inline">Share</span>
+   109→          </Button>
+   110→          <Button
+   111→            variant="ghost"
+   112→            size="sm"
+   113→            className="h-9 rounded-full px-3 text-muted-foreground"
+   114→            onClick={() => setReportOpen(true)}
+   115→          >
+   116→            <Flag className="h-4 w-4" />
+   117→            <span className="ml-1 hidden sm:inline">Report</span>
+   118→          </Button>
+   119→        </div>
+   120→      </div>
+   121→
+   122→      {/* Photos strip */}
+   123→      {photos.length > 0 && (
+   124→        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar md:mx-0 md:px-0">
+   125→          {photos.map((p, i) => (
+   126→            <div
+   127→              key={i}
+   128→              className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-border/60 bg-card shadow-soft"
+   129→            >
+   130→              <img src={p} alt={`Scan photo ${i + 1}`} className="h-full w-full object-cover" />
+   131→            </div>
+   132→          ))}
+   133→        </div>
+   134→      )}
+   135→
+   136→      {/* Desktop: two-column layout. Mobile: single column. */}
+   137→      <div className="grid gap-4 md:grid-cols-[1fr_1.4fr] md:gap-6">
+   138→        {/* LEFT column: identity + key facts */}
+   139→        <div className="flex flex-col gap-4">
+   140→          {/* Identity hero card */}
+   141→          <motion.div
+   142→            initial={{ opacity: 0, y: 12 }}
+   143→            animate={{ opacity: 1, y: 0 }}
+   144→            transition={{ duration: 0.35 }}
+   145→          >
+   146→            <Card className="relative overflow-hidden border-border/60 p-0 shadow-lifted">
+   147→              {/* Black gradient header */}
+   148→              <div className="relative overflow-hidden bg-primary px-5 pb-5 pt-5 text-white">
+   149→                <div
+   150→                  aria-hidden
+   151→                  className="pointer-events-none absolute -right-8 -top-12 h-32 w-32 rounded-full bg-white/10 blur-2xl"
+   152→                />
+   153→                <div
+   154→                  aria-hidden
+   155→                  className="pointer-events-none absolute -bottom-10 -left-6 h-32 w-32 rounded-full bg-white/5 blur-2xl"
+   156→                />
+   157→                <div className="relative flex items-start justify-between gap-2">
+   158→                  <div className="flex items-start gap-3">
+   159→                    {/* Medicine illustration on white bg */}
+   160→                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-sm">
+   161→                      {result.appearance ? (
+   162→                        <MedicineThumb
+   163→                          result={result}
+   164→                          compact
+   165→                          className="!bg-white/15 !shadow-none"
+   166→                        />
+   167→                      ) : (
+   168→                        <FormIcon form={result.form} className="h-6 w-6 text-background" />
+   169→                      )}
+   170→                    </div>
+   171→                    <div className="min-w-0">
+   172→                      <h2 className="font-display text-xl font-bold leading-tight text-balance">
+   173→                        {result.brandName}
+   174→                      </h2>
+   175→                      <p className="mt-0.5 text-sm text-background/80 leading-snug">
+   176→                        {result.genericName}
+   177→                      </p>
+   178→                      {result.manufacturer && (
+   179→                        <p className="mt-0.5 text-[11px] text-background/60">
+   180→                          {result.manufacturer}
+   181→                        </p>
+   182→                      )}
+   183→                    </div>
+   184→                  </div>
+   185→                </div>
+   186→
+   187→                {/* Strength hero */}
+   188→                <div className="relative mt-4 flex items-end justify-between">
+   189→                  <div>
+   190→                    <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-background/60">
+   191→                      Strength
+   192→                    </p>
+   193→                    <div className="mt-0.5 flex items-baseline gap-1.5">
+   194→                      <span className="font-display text-[44px] font-bold leading-none tracking-tight tabular-nums">
+   195→                        {result.strengthValue}
+   196→                      </span>
+   197→                      <span className="text-lg font-bold text-background/85">
+   198→                        {result.strengthUnit}
+   199→                      </span>
+   200→                    </div>
+   201→                  </div>
+   202→                  {result.packageSize && (
+   203→                    <div className="text-right">
+   204→                      <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-background/60">
+   205→                        Package
+   206→                      </p>
+   207→                      <p className="mt-0.5 text-sm font-semibold text-background/90">
+   208→                        {result.packageSize}
+   209→                      </p>
+   210→                    </div>
+   211→                  )}
+   212→                </div>
+   213→              </div>
+   214→
+   215→              {/* Body: confidence + match note + quick facts */}
+   216→              <div className="space-y-3 p-5">
+   217→                <div className="flex items-center justify-between gap-2">
+   218→                  <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+   219→                    Confidence
+   220→                  </span>
+   221→                  <ConfidenceBadge confidence={result.confidence} />
+   222→                </div>
+   223→
+   224→                {result.drugClass && (
+   225→                  <QuickFact icon={FlaskConical} label="Drug class" value={result.drugClass} />
+   226→                )}
+   227→                {result.form && (
+   228→                  <QuickFact icon={Pill} label="Form" value={formLabel(result.form)} />
+   229→                )}
+   230→                {result.imprint && (
+   231→                  <QuickFact icon={PillBottle} label="Imprint code" value={result.imprint} mono />
+   232→                )}
+   233→                {result.halfLife && (
+   234→                  <QuickFact icon={Clock} label="Half-life" value={result.halfLife} />
+   235→                )}
+   236→                {result.onsetOfAction && (
+   237→                  <QuickFact icon={Activity} label="Onset" value={result.onsetOfAction} />
+   238→                )}
+   239→
+   240→                {result.matchNote && (
+   241→                  <p className="flex items-start gap-1.5 rounded-xl bg-muted/60 p-2.5 text-xs text-foreground">
+   242→                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   243→                    <span>{result.matchNote}</span>
+   244→                  </p>
+   245→                )}
+   246→              </div>
+   247→            </Card>
+   248→          </motion.div>
+   249→
+   250→          {/* High-risk / allergy warning */}
+   251→          {(isHighRisk || allergyHits.length > 0) && (
+   252→            <motion.div
+   253→              initial={{ opacity: 0, scale: 0.97 }}
+   254→              animate={{ opacity: 1, scale: 1 }}
+   255→              transition={{ delay: 0.1, duration: 0.3 }}
+   256→              className={cn(
+   257→                "rounded-2xl border-2 p-4 shadow-soft",
+   258→                allergyHits.length > 0
+   259→                  ? "border-danger/40 bg-danger-soft/70"
+   260→                  : "border-warn/40 bg-warn-soft/70"
+   261→              )}
+   262→            >
+   263→              <div className="flex items-start gap-2.5">
+   264→                <ShieldAlert
+   265→                  className={cn(
+   266→                    "mt-0.5 h-5 w-5 shrink-0",
+   267→                    allergyHits.length > 0 ? "text-danger" : "text-warn"
+   268→                  )}
+   269→                />
+   270→                <div className="flex-1">
+   271→                  <p
+   272→                    className={cn(
+   273→                      "font-bold",
+   274→                      allergyHits.length > 0 ? "text-danger" : "text-warn-foreground"
+   275→                    )}
+   276→                  >
+   277→                    {allergyHits.length > 0
+   278→                      ? "Possible allergy conflict"
+   279→                      : result.controlledSubstance
+   280→                        ? "Controlled substance"
+   281→                        : "High-risk medication"}
+   282→                  </p>
+   283→                  <p className="mt-1 text-sm text-foreground/80">
+   284→                    {allergyHits.length > 0 ? (
+   285→                      <>
+   286→                        This medicine's active ingredients may match your recorded
+   287→                        allergies: <strong>{allergyHits.join(", ")}</strong>. Do not take
+   288→                        without consulting a doctor or pharmacist.
+   289→                      </>
+   290→                    ) : result.controlledSubstance ? (
+   291→                      <>This medicine may be regulated as a controlled substance.</>
+   292→                    ) : (
+   293→                      <>This medicine has serious side effects worth reviewing carefully.</>
+   294→                    )}
+   295→                  </p>
+   296→                </div>
+   297→              </div>
+   298→            </motion.div>
+   299→          )}
+   300→
+   301→          {/* Sources */}
+   302→          {result.sources.length > 0 && (
+   303→            <Card className="border-border/60 p-5 shadow-soft">
+   304→              <SectionHeader title="Sources" icon={ExternalLink} />
+   305→              <div className="mt-3 space-y-2">
+   306→                {result.sources.map((src, i) => (
+   307→                  <a
+   308→                    key={i}
+   309→                    href={src.url || "#"}
+   310→                    target={src.url ? "_blank" : undefined}
+   311→                    rel="noreferrer noopener"
+   312→                    className="flex items-center justify-between rounded-xl border border-border/60 bg-card px-3 py-2.5 transition-colors hover:border-foreground/30 hover:bg-muted/40"
+   313→                  >
+   314→                    <div className="min-w-0 flex-1">
+   315→                      <p className="truncate text-sm font-medium">{src.label}</p>
+   316→                      {src.url && (
+   317→                        <p className="truncate text-[11px] text-muted-foreground">
+   318→                          {src.url}
+   319→                        </p>
+   320→                      )}
+   321→                    </div>
+   322→                    <ExternalLink className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+   323→                  </a>
+   324→                ))}
+   325→              </div>
+   326→            </Card>
+   327→          )}
+   328→        </div>
+   329→
+   330→        {/* RIGHT column: detailed info sections */}
+   331→        <div className="flex flex-col gap-4">
+   332→          {/* What it's used for */}
+   333→          <ResultCard
+   334→            title="What it's used for"
+   335→            icon={Activity}
+   336→            items={result.usedFor}
+   337→            onExpand={() => {
+   338→              setActiveDetailSection("uses");
+   339→              navigate("result-detail");
+   340→            }}
+   341→          />
+   342→
+   343→          {/* How it works (mechanism) */}
+   344→          {result.mechanismOfAction && (
+   345→            <Card className="border-border/60 p-5 shadow-soft">
+   346→              <SectionHeader title="How it works" icon={Network} />
+   347→              <p className="mt-3 text-sm leading-relaxed text-foreground/90">
+   348→                {result.mechanismOfAction}
+   349→              </p>
+   350→            </Card>
+   351→          )}
+   352→
+   353→          {/* Composition */}
+   354→          {result.composition && (
+   355→            <Card className="border-border/60 p-5 shadow-soft">
+   356→              <SectionHeader title="Composition" icon={Beaker} />
+   357→              <p className="mt-3 text-sm leading-relaxed text-foreground/90">
+   358→                {result.composition}
+   359→              </p>
+   360→              {result.activeIngredients.length > 0 && (
+   361→                <div className="mt-3 flex flex-wrap gap-1.5">
+   362→                  {result.activeIngredients.map((ing, i) => (
+   363→                    <span
+   364→                      key={i}
+   365→                      className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-foreground"
+   366→                    >
+   367→                      {ing}
+   368→                    </span>
+   369→                  ))}
+   370→                </div>
+   371→              )}
+   372→            </Card>
+   373→          )}
+   374→
+   375→          {/* Pharmacokinetics grid */}
+   376→          {(result.metabolism || result.excretion || result.durationOfAction || result.pregnancyCategory) && (
+   377→            <Card className="border-border/60 p-5 shadow-soft">
+   378→              <SectionHeader title="Pharmacology" icon={FlaskConical} />
+   379→              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+   380→                {result.metabolism && (
+   381→                  <PharmaFact icon={Beaker} label="Metabolism" value={result.metabolism} />
+   382→                )}
+   383→                {result.excretion && (
+   384→                  <PharmaFact icon={Droplet} label="Excretion" value={result.excretion} />
+   385→                )}
+   386→                {result.durationOfAction && (
+   387→                  <PharmaFact icon={Clock} label="Duration" value={result.durationOfAction} />
+   388→                )}
+   389→                {result.pregnancyCategory && (
+   390→                  <PharmaFact icon={Baby} label="Pregnancy" value={result.pregnancyCategory} />
+   391→                )}
+   392→              </div>
+   393→            </Card>
+   394→          )}
+   395→
+   396→          {/* Common side effects */}
+   397→          <ResultCard
+   398→            title="Common side effects"
+   399→            icon={Pill}
+   400→            accent="safe"
+   401→            subtitle="Everyday effects that typically aren't severe"
+   402→            items={result.commonSideEffects}
+   403→            onExpand={() => {
+   404→              setActiveDetailSection("common-side-effects");
+   405→              navigate("result-detail");
+   406→            }}
+   407→          />
+   408→
+   409→          {/* Serious side effects */}
+   410→          {result.seriousSideEffects.length > 0 && (
+   411→            <ResultCard
+   412→              title="Serious side effects"
+   413→              icon={AlertTriangle}
+   414→              accent="danger"
+   415→              subtitle="Contact a doctor if any of these occur"
+   416→              items={result.seriousSideEffects}
+   417→              onExpand={() => {
+   418→                setActiveDetailSection("serious-side-effects");
+   419→                navigate("result-detail");
+   420→              }}
+   421→            />
+   422→          )}
+   423→
+   424→          {/* Overdose symptoms */}
+   425→          {result.overdoseSymptoms && result.overdoseSymptoms.length > 0 && (
+   426→            <ResultCard
+   427→              title="Overdose symptoms"
+   428→              icon={Skull}
+   429→              accent="danger"
+   430→              subtitle="Seek emergency medical attention if you suspect overdose"
+   431→              items={result.overdoseSymptoms}
+   432→            />
+   433→          )}
+   434→
+   435→          {/* Interactions */}
+   436→          {result.interactions.length > 0 && (
+   437→            <Card className="border-border/60 p-5 shadow-soft">
+   438→              <SectionHeader
+   439→                title="Interactions"
+   440→                icon={HeartPulse}
+   441→                accent="warn"
+   442→                onExpand={
+   443→                  result.interactions.length > 3
+   444→                    ? () => {
+   445→                        setActiveDetailSection("interactions");
+   446→                        navigate("result-detail");
+   447→                      }
+   448→                    : undefined
+   449→                }
+   450→              />
+   451→              <div className="mt-3 space-y-2">
+   452→                {result.interactions.slice(0, 5).map((ix, i) => (
+   453→                  <div
+   454→                    key={i}
+   455→                    className={cn(
+   456→                      "flex items-start gap-2 rounded-xl border p-3",
+   457→                      ix.severity === "avoid"
+   458→                        ? "border-danger/30 bg-danger-soft/40"
+   459→                        : "border-warn/30 bg-warn-soft/40"
+   460→                    )}
+   461→                  >
+   462→                    <Ban
+   463→                      className={cn(
+   464→                        "mt-0.5 h-4 w-4 shrink-0",
+   465→                        ix.severity === "avoid" ? "text-danger" : "text-warn"
+   466→                      )}
+   467→                    />
+   468→                    <div className="flex-1">
+   469→                      <p className="text-sm font-semibold">{ix.with}</p>
+   470→                      <p className="mt-0.5 text-xs text-muted-foreground">{ix.note}</p>
+   471→                    </div>
+   472→                    <Badge
+   473→                      variant="outline"
+   474→                      className={cn(
+   475→                        "border-0 text-[10px] font-bold uppercase tracking-wide",
+   476→                        ix.severity === "avoid"
+   477→                          ? "bg-danger text-danger-foreground"
+   478→                          : "bg-warn text-warn-foreground"
+   479→                      )}
+   480→                    >
+   481→                      {ix.severity === "avoid" ? "Avoid" : "Caution"}
+   482→                    </Badge>
+   483→                  </div>
+   484→                ))}
+   485→              </div>
+   486→            </Card>
+   487→          )}
+   488→
+   489→          {/* Who should avoid */}
+   490→          {result.whoShouldAvoid.length > 0 && (
+   491→            <ResultCard
+   492→              title="Who should avoid it"
+   493→              icon={Ban}
+   494→              accent="warn"
+   495→              items={result.whoShouldAvoid.map((w) => `${w.group}: ${w.reason}`)}
+   496→              onExpand={() => {
+   497→                setActiveDetailSection("who-should-avoid");
+   498→                navigate("result-detail");
+   499→              }}
+   500→            />
+   501→          )}
+   502→
+   503→          {/* Dietary advice */}
+   504→          {result.dietaryAdvice && result.dietaryAdvice.length > 0 && (
+   505→            <ResultCard
+   506→              title="Dietary advice"
+   507→              icon={Utensils}
+   508→              items={result.dietaryAdvice}
+   509→            />
+   510→          )}
+   511→
+   512→          {/* Missed dose */}
+   513→          {result.whatToDoIfMissed && (
+   514→            <Card className="border-border/60 p-5 shadow-soft">
+   515→              <SectionHeader title="If you miss a dose" icon={Clock} />
+   516→              <p className="mt-3 text-sm leading-relaxed text-foreground/90">
+   517→                {result.whatToDoIfMissed}
+   518→              </p>
+   519→            </Card>
+   520→          )}
+   521→
+   522→          {/* Related medicines */}
+   523→          {result.relatedMedicines && result.relatedMedicines.length > 0 && (
+   524→            <Card className="border-border/60 p-5 shadow-soft">
+   525→              <SectionHeader title="Related medicines" icon={Network} />
+   526→              <div className="mt-3 flex flex-wrap gap-1.5">
+   527→                {result.relatedMedicines.map((m, i) => (
+   528→                  <span
+   529→                    key={i}
+   530→                    className="rounded-full border border-border/60 bg-card px-3 py-1 text-xs font-medium text-foreground"
+   531→                  >
+   532→                    {m}
+   533→                  </span>
+   534→                ))}
+   535→              </div>
+   536→            </Card>
+   537→          )}
+   538→
+   539→          {/* Storage */}
+   540→          <ResultCard
+   541→            title="Storage instructions"
+   542→            icon={Thermometer}
+   543→            items={[result.storageInstructions]}
+   544→            onExpand={() => {
+   545→              setActiveDetailSection("storage");
+   546→              navigate("result-detail");
+   547→            }}
+   548→          />
+   549→
+   550→          {/* Disclaimer footer */}
+   551→          <div className="rounded-2xl bg-muted/60 p-4 text-xs text-muted-foreground">
+   552→            <div className="mb-1 flex items-center gap-1.5 font-semibold text-foreground">
+   553→              <ClipboardList className="h-3.5 w-3.5" />
+   554→              Important
+   555→            </div>
+   556→            This information is for general education only and is not a substitute for
+   557→            professional medical advice. Always consult a doctor or pharmacist before
+   558→            starting, stopping, or changing any medication.
+   559→          </div>
+   560→
+   561→          {/* Actions */}
+   562→          <div className="flex gap-2">
+   563→            <Button
+   564→              onClick={() => navigate("home")}
+   565→              variant="secondary"
+   566→              className="h-12 flex-1 rounded-xl"
+   567→            >
+   568→              Done
+   569→            </Button>
+   570→            <Button
+   571→              onClick={() => navigate("capture")}
+   572→              className="h-12 flex-1 rounded-xl"
+   573→            >
+   574→              Scan another
+   575→            </Button>
+   576→          </div>
+   577→        </div>
+   578→      </div>
+   579→
+   580→      <ReportDialog
+   581→        open={reportOpen}
+   582→        onOpenChange={setReportOpen}
+   583→        scanId={currentScanId ?? result.id}
+   584→        fields={[
+   585→          "brandName",
+   586→          "genericName",
+   587→          "strengthValue",
+   588→          "form",
+   589→          "usedFor",
+   590→          "mechanismOfAction",
+   591→          "composition",
+   592→          "commonSideEffects",
+   593→          "seriousSideEffects",
+   594→          "interactions",
+   595→          "whoShouldAvoid",
+   596→          "storageInstructions",
+   597→        ]}
+   598→      />
+   599→    </div>
+   600→  );
+   601→}
+   602→
+   603→function QuickFact({
+   604→  icon: Icon,
+   605→  label,
+   606→  value,
+   607→  mono = false,
+   608→}: {
+   609→  icon: React.ComponentType<{ className?: string }>;
+   610→  label: string;
+   611→  value: string;
+   612→  mono?: boolean;
+   613→}) {
+   614→  return (
+   615→    <div className="flex items-center justify-between gap-2 border-b border-border/40 pb-2 last:border-0 last:pb-0">
+   616→      <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+   617→        <Icon className="h-3.5 w-3.5" />
+   618→        {label}
+   619→      </span>
+   620→      <span className={cn("text-right text-xs font-medium text-foreground", mono && "font-mono")}>
+   621→        {value}
+   622→      </span>
+   623→    </div>
+   624→  );
+   625→}
+   626→
+   627→function PharmaFact({
+   628→  icon: Icon,
+   629→  label,
+   630→  value,
+   631→}: {
+   632→  icon: React.ComponentType<{ className?: string }>;
+   633→  label: string;
+   634→  value: string;
+   635→}) {
+   636→  return (
+   637→    <div className="rounded-xl bg-muted/40 p-3">
+   638→      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+   639→        <Icon className="h-3 w-3" />
+   640→        {label}
+   641→      </p>
+   642→      <p className="mt-1 text-xs font-medium leading-snug text-foreground">{value}</p>
+   643→    </div>
+   644→  );
+   645→}
+   646→
+   647→function SectionHeader({
+   648→  title,
+   649→  icon: Icon,
+   650→  accent = "default",
+   651→  onExpand,
+   652→}: {
+   653→  title: string;
+   654→  icon: React.ComponentType<{ className?: string }>;
+   655→  accent?: "default" | "safe" | "warn" | "danger";
+   656→  onExpand?: () => void;
+   657→}) {
+   658→  const accentClasses = {
+   659→    default: "bg-muted text-foreground",
+   660→    safe: "bg-safe-soft text-safe",
+   661→    warn: "bg-warn-soft text-warn-foreground",
+   662→    danger: "bg-danger-soft text-danger",
+   663→  }[accent];
+   664→
+   665→  return (
+   666→    <div className="flex items-center justify-between">
+   667→      <div className="flex items-center gap-2.5">
+   668→        <div className={cn("flex h-8 w-8 items-center justify-center rounded-lg", accentClasses)}>
+   669→          <Icon className="h-4 w-4" />
+   670→        </div>
+   671→        <h3 className="font-display text-base font-semibold">{title}</h3>
+   672→      </div>
+   673→      {onExpand && (
+   674→        <button
+   675→          onClick={onExpand}
+   676→          className="flex items-center gap-0.5 text-xs font-medium text-foreground hover:underline"
+   677→          aria-label={`See more about ${title}`}
+   678→        >
+   679→          More <ChevronRight className="h-3.5 w-3.5" />
+   680→        </button>
+   681→      )}
+   682→    </div>
+   683→  );
+   684→}
+   685→
+   686→function ResultCard({
+   687→  title,
+   688→  icon,
+   689→  accent = "default",
+   690→  subtitle,
+   691→  items,
+   692→  onExpand,
+   693→}: {
+   694→  title: string;
+   695→  icon: React.ComponentType<{ className?: string }>;
+   696→  accent?: "default" | "safe" | "warn" | "danger";
+   697→  subtitle?: string;
+   698→  items: string[];
+   699→  onExpand?: () => void;
+   700→}) {
+   701→  if (items.length === 0) return null;
+   702→  const preview = items.slice(0, 4);
+   703→  const hasMore = items.length > preview.length || Boolean(onExpand);
+   704→
+   705→  return (
+   706→    <Card className="border-border/60 p-5 shadow-soft">
+   707→      <SectionHeader title={title} icon={icon} accent={accent} onExpand={hasMore ? onExpand : undefined} />
+   708→      {subtitle && <p className="mt-1.5 text-xs text-muted-foreground">{subtitle}</p>}
+   709→      <ul className="mt-3 space-y-2">
+   710→        {preview.map((item, i) => (
+   711→          <li key={i} className="flex items-start gap-2 text-sm">
+   712→            <span
+   713→              className={cn(
+   714→                "mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full",
+   715→                accent === "safe" && "bg-safe",
+   716→                accent === "warn" && "bg-warn",
+   717→                accent === "danger" && "bg-danger",
+   718→                accent === "default" && "bg-foreground"
+   719→              )}
+   720→            />
+   721→            <span className="text-foreground/90">{item}</span>
+   722→          </li>
+   723→        ))}
+   724→      </ul>
+   725→      {hasMore && items.length > preview.length && (
+   726→        <p className="mt-2 text-xs text-muted-foreground">
+   727→          + {items.length - preview.length} more
+   728→        </p>
+   729→      )}
+   730→    </Card>
+   731→  );
+   732→}
+   733→

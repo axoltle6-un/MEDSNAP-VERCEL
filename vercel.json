@@ -1,0 +1,25 @@
+{
+  "buildCommand": "next build",
+  "framework": "nextjs",
+  "regions": ["hkg1"],
+  "functions": {
+    "src/app/api/ai-search/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/scan/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/auth/send-verification-code/route.ts": {
+      "maxDuration": 20
+    },
+    "src/app/api/auth/send-reset-code/route.ts": {
+      "maxDuration": 20
+    },
+    "src/app/api/auth/verify-email/route.ts": {
+      "maxDuration": 20
+    },
+    "src/app/api/auth/reset-password/route.ts": {
+      "maxDuration": 20
+    }
+  }
+}

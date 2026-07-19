@@ -1,0 +1,20 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="34" fill="url(#medsnap_grad)"/>
+  <path d="M22 42V28C22 25.2386 24.2386 23 27 23H41" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
+  <path d="M79 23H93C95.7614 23 98 25.2386 98 28V42" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
+  <path d="M98 78V92C98 94.7614 95.7614 97 93 97H79" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
+  <path d="M41 97H27C24.2386 97 22 94.7614 22 92V78" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
+  <g transform="rotate(-45 60 60)">
+    <rect x="30" y="46" width="30" height="28" rx="14" fill="white"/>
+    <rect x="60" y="46" width="30" height="28" rx="14" fill="white" fill-opacity="0.55"/>
+    <line x1="60" y1="46" x2="60" y2="74" stroke="#0D6EFD" stroke-width="2" stroke-opacity="0.4"/>
+  </g>
+  <path d="M88 28L90 36L98 38L90 40L88 48L86 40L78 38L86 36L88 28Z" fill="#60A5FA"/>
+  <defs>
+    <linearGradient id="medsnap_grad" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset="0.5" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#0D6EFD"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,19 @@
+{
+  "name": "MedSnap — AI Medicine Identifier",
+  "short_name": "MedSnap",
+  "description": "Point your camera at any medicine. Know exactly what it is before you take it.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAFAF8",
+  "theme_color": "#2D6CDF",
+  "categories": ["health", "medical", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

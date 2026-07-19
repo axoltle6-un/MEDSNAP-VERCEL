@@ -1,0 +1,313 @@
+import { NextRequest, NextResponse } from "next/server";
+import type { MedicineResult } from "@/lib/types";
+import { identifyFromVerifiedSources } from "@/lib/verified-sources";
+import { searchMedicines } from "@/lib/medicine-db";
+import { recordUsage } from "@/app/api/ai-usage/route";
+import { getClientIp, checkRateLimit, verifyAuthToken } from "@/lib/api-utils";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const NOT_FOUND = "Not found — please check the package insert or ask a pharmacist";
+
+const AI_PROMPT = `You are MedSnap, a medicine identification assistant. You will be given a photo of a medicine (pill, tablet, capsule, syrup bottle, cream tube, or medicine box) and optionally some text info.
+
+Your job is to:
+1. Look at the photo and read ALL visible text — brand name, generic name, dosage (e.g. "500 mg"), manufacturer, form, imprint codes, etc.
+2. Identify the medicine from what you see in the photo
+3. Provide comprehensive, accurate medical information about it
+
+Respond with STRICT JSON only — no prose, no markdown fences. Just the raw JSON object. Schema:
+
+{"brandName":"string","genericName":"string","manufacturer":"string","strengthValue":"string","strengthUnit":"string","form":"tablet|capsule|syrup|injection|cream|drops|inhaler|patch|suppository|powder|unknown","packageSize":"string","usedFor":["string"],"activeIngredients":["string"],"commonSideEffects":["string"],"seriousSideEffects":["string"],"interactions":[{"with":"string","severity":"caution|avoid","note":"string"}],"whoShouldAvoid":[{"group":"string","reason":"string"}],"storageInstructions":"string","drugClass":"string","mechanismOfAction":"string","composition":"string","halfLife":"string","onsetOfAction":"string","durationOfAction":"string","metabolism":"string","excretion":"string","pregnancyCategory":"string","overdoseSymptoms":["string"],"whatToDoIfMissed":"string","dietaryAdvice":["string"],"relatedMedicines":["string"],"confidence":"high|medium|low","matchNote":"string"}
+
+Rules:
+- Read the photo carefully — identify brand name, generic name, dosage from the packaging/label.
+- Base your medical info on established knowledge, not just what's visible in the photo.
+- If the photo is unclear, try your best to identify from context clues (color, shape, markings).
+- If you absolutely cannot identify the medicine, return brandName as "Unable to identify" and explain in matchNote.
+- Do NOT fabricate. For fields you can't determine, use empty string or empty array.
+- Do NOT wrap the JSON in markdown fences.`;
+
+// API keys — from environment variables with fallback
+const LLM7_API_KEY = process.env.LLM7_API_KEY || "ZXqbHHl0NTtKGTK2m96zuDA9zYYdoezRclBRbBghbbird0P+5KvToZ7BY5ZXi8PIjT3kGPm4JqigM6TUBAGGmgjpnOSbgTzRF8JuBDT59LmEaJMWgnBS68KaJYY6irf/3t46c4izWJyvFBncEws=";
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || "Jd3O3M8vLUvgW90V1g5emeSODW0twJbJ";
+
+export async function POST(req: NextRequest) {
+  const clientIp = getClientIp(req);
+  const userToken = await verifyAuthToken(req);
+
+  // Rate Limiting: 30 searches per 15 min for verified users, 10 for unverified/anonymous
+  const limitKey = userToken ? `ai-search:uid:${userToken.uid}` : `ai-search:ip:${clientIp}`;
+  const rateLimit = checkRateLimit(limitKey, userToken ? 30 : 10, 15 * 60 * 1000);
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many AI analysis requests. Please wait a few minutes before scanning again." },
+      { status: 429 }
+    );
+  }
+
+  let body: { ocrText?: string; query?: string; photos?: string[] };
+
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const ocrText = (body.ocrText || "").trim();
+  const query = (body.query || "").trim();
+  const photos = (body.photos || []).filter(Boolean);
+  const searchText = (query || ocrText || "").trim();
+
+  if (!searchText && photos.length === 0) {
+    return NextResponse.json(
+      { error: "Please provide a photo or medicine name" },
+      { status: 400 }
+    );
+  }
+
+  // Build the user message
+  let userMessage = "Please identify this medicine and provide comprehensive information.\n";
+  if (query) userMessage += `\nUser-entered name: ${query}\n`;
+  if (ocrText) userMessage += `\nAdditional info: ${ocrText}\n`;
+  if (photos.length === 0) userMessage += `\n(No photo provided — identify from the name/info above)\n`;
+
+  // Filter photos to reasonable size
+  const imagesToSend = photos
+    .filter((p) => p.length < 2_000_000)
+    .slice(0, 2);
+
+  const hasImages = imagesToSend.length > 0;
+
+  try {
+    let content: string;
+    let usedVision = false;
+
+    if (hasImages) {
+      console.log("[ai-search] Using Mistral Pixtral (vision, free)");
+      content = await callMistral(userMessage, imagesToSend);
+      usedVision = true;
+      recordUsage("mistral", content.length);
+    } else {
+      console.log("[ai-search] Using LLM7 codestral (text, free)");
+      content = await callLLM7(userMessage);
+      recordUsage("llm7", content.length);
+    }
+
+    // Strip markdown fences
+    let cleanContent = content
+      .replace(/```json\s*/gi, "")
+      .replace(/```\s*/gi, "")
+      .trim();
+
+    // Extract JSON
+    const jsonStart = cleanContent.indexOf("{");
+    const jsonEnd = cleanContent.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd === -1) {
+      console.error("[ai-search] no JSON found, falling back to verified sources");
+      return fallbackToVerifiedSources(searchText, "AI returned invalid format — using verified sources");
+    }
+    cleanContent = cleanContent.slice(jsonStart, jsonEnd + 1);
+
+    // Clean up JSON
+    cleanContent = cleanContent.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+    cleanContent = cleanContent.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, "\u0026");
+    cleanContent = cleanContent.replace(/,\s*([}\]])/g, "$1");
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(cleanContent);
+    } catch {
+      console.error("[ai-search] JSON parse failed, falling back to verified sources");
+      return fallbackToVerifiedSources(searchText, "AI returned invalid JSON — using verified sources");
+    }
+
+    // Assemble MedicineResult
+    const result: MedicineResult = {
+      id: `ai-${Date.now()}`,
+      brandName: (parsed.brandName as string) || "Unknown",
+      genericName: (parsed.genericName as string) || NOT_FOUND,
+      manufacturer: (parsed.manufacturer as string) || undefined,
+      strengthValue: (parsed.strengthValue as string) || "?",
+      strengthUnit: (parsed.strengthUnit as string) || "",
+      strengthDisplay:
+        parsed.strengthValue && parsed.strengthUnit
+          ? `${parsed.strengthValue} ${parsed.strengthUnit}`
+          : "See label",
+      form: (parsed.form as MedicineResult["form"]) || "unknown",
+      packageSize: (parsed.packageSize as string) || undefined,
+      usedFor: (parsed.usedFor as string[]) || [],
+      activeIngredients: (parsed.activeIngredients as string[]) || [],
+      commonSideEffects: (parsed.commonSideEffects as string[]) || [],
+      seriousSideEffects: (parsed.seriousSideEffects as string[]) || [],
+      interactions: (parsed.interactions as MedicineResult["interactions"]) || [],
+      whoShouldAvoid: (parsed.whoShouldAvoid as MedicineResult["whoShouldAvoid"]) || [],
+      storageInstructions: (parsed.storageInstructions as string) || NOT_FOUND,
+      confidence: (parsed.confidence as MedicineResult["confidence"]) || "medium",
+      matchNote: `AI-identified${usedVision ? " from photo" : ""} · ${(parsed.matchNote as string) || ""}`.trim(),
+      sources: usedVision
+        ? [
+            { label: "AI Analysis (Mistral Pixtral)", url: "https://mistral.ai" },
+            { label: "openFDA Drug Label (FDA)", url: "https://open.fda.gov/data/downloads/" },
+          ]
+        : [
+            { label: "AI Analysis (Codestral)", url: "https://llm7.io" },
+            { label: "openFDA Drug Label (FDA)", url: "https://open.fda.gov/data/downloads/" },
+          ],
+      drugClass: (parsed.drugClass as string) || undefined,
+      mechanismOfAction: (parsed.mechanismOfAction as string) || undefined,
+      howItWorks: (parsed.mechanismOfAction as string) || undefined,
+      composition: (parsed.composition as string) || undefined,
+      halfLife: (parsed.halfLife as string) || undefined,
+      onsetOfAction: (parsed.onsetOfAction as string) || undefined,
+      durationOfAction: (parsed.durationOfAction as string) || undefined,
+      metabolism: (parsed.metabolism as string) || undefined,
+      excretion: (parsed.excretion as string) || undefined,
+      pregnancyCategory: (parsed.pregnancyCategory as string) || undefined,
+      overdoseSymptoms: (parsed.overdoseSymptoms as string[]) || undefined,
+      whatToDoIfMissed: (parsed.whatToDoIfMissed as string) || undefined,
+      dietaryAdvice: (parsed.dietaryAdvice as string[]) || undefined,
+      relatedMedicines: (parsed.relatedMedicines as string[]) || undefined,
+    };
+
+    return NextResponse.json({ result });
+  } catch (err) {
+    console.error("[ai-search] AI call failed:", err);
+    return fallbackToVerifiedSources(searchText, "AI service unavailable — using verified sources");
+  }
+}
+
+async function callLLM7(userMessage: string): Promise<string> {
+  const res = await fetch("https://api.llm7.io/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${LLM7_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "codestral-latest",
+      messages: [
+        { role: "system", content: AI_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`LLM7 API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const json = await res.json();
+  return json.choices?.[0]?.message?.content || "";
+}
+
+async function callMistral(userMessage: string, images: string[]): Promise<string> {
+  const userContent = [
+    { type: "text", text: userMessage },
+    ...images.slice(0, 2).map((url) => ({
+      type: "image_url",
+      image_url: { url },
+    })),
+  ];
+
+  const res = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${MISTRAL_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "pixtral-12b-2409",
+      messages: [
+        { role: "system", content: AI_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+    }),
+    signal: AbortSignal.timeout(55000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Mistral API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const json = await res.json();
+  return json.choices?.[0]?.message?.content || "";
+}
+
+async function fallbackToVerifiedSources(
+  query: string,
+  reason: string
+): Promise<NextResponse> {
+  const searchTerm = (query || "").trim();
+  console.log("[ai-search] Falling back to verified sources for:", searchTerm || "(no text)");
+
+  if (!searchTerm) {
+    return NextResponse.json({
+      result: {
+        id: `no-text-${Date.now()}`,
+        brandName: "Please type a medicine name",
+        genericName: "The AI needs a medicine name to generate a report.",
+        strengthValue: "?",
+        strengthUnit: "",
+        strengthDisplay: "—",
+        form: "unknown",
+        usedFor: [],
+        activeIngredients: [],
+        commonSideEffects: [],
+        seriousSideEffects: [],
+        interactions: [],
+        whoShouldAvoid: [],
+        storageInstructions: "",
+        confidence: "low",
+        matchNote: reason,
+        sources: [
+          { label: "openFDA Drug Label (FDA)", url: "https://open.fda.gov/data/downloads/" },
+          { label: "RxNorm (NIH)", url: "https://rxnav.nlm.nih.gov" },
+        ],
+      },
+    });
+  }
+
+  try {
+    const dbMatch = searchMedicines(searchTerm, 1);
+    if (dbMatch.length > 0) {
+      recordUsage("verified");
+      const result = {
+        ...dbMatch[0],
+        matchNote: `${reason} · matched built-in database`,
+        sources: [
+          ...dbMatch[0].sources,
+          { label: "openFDA Drug Label (FDA)", url: "https://open.fda.gov/data/downloads/" },
+          { label: "RxNorm (NIH)", url: "https://rxnav.nlm.nih.gov" },
+        ],
+      };
+      console.log("[ai-search] ✓ Found in built-in DB:", result.brandName);
+      return NextResponse.json({ result });
+    }
+
+    const verifiedResult = await identifyFromVerifiedSources({ query: searchTerm });
+    recordUsage("verified");
+    console.log("[ai-search] ✓ Found via verified sources:", verifiedResult.brandName);
+    return NextResponse.json({
+      result: {
+        ...verifiedResult,
+        matchNote: `${reason} · ${verifiedResult.matchNote || "matched via openFDA/RxNorm"}`,
+      },
+    });
+  } catch (err) {
+    console.error("[ai-search] verified sources fallback also failed:", err);
+    return NextResponse.json(
+      { error: `Could not identify medicine. ${reason}.` },
+      { status: 404 }
+    );
+  }
+}

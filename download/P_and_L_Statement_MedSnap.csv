@@ -1,0 +1,16 @@
+Category,Sub-Category,Monthly Avg (USD),TTM Total (USD),Notes
+Revenue,Pro Subscription Sales ($19.99/mo),0.00,0.00,Pre-revenue turnkey asset
+Revenue,Pro Annual Plan Sales ($99.99/yr),0.00,0.00,Pre-revenue turnkey asset
+Total Revenue,,0.00,0.00,
+Cost of Goods Sold (COGS),Vercel Hosting & Serverless Edge,0.00,0.00,Hosted on Vercel Hobby/Free tier
+Cost of Goods Sold (COGS),Cloud Firestore Database Sync,0.00,0.00,Firebase Free Tier quota
+Cost of Goods Sold (COGS),openFDA & NIH Government APIs,0.00,0.00,100% Free US Gov APIs
+Cost of Goods Sold (COGS),AI Vision Models (Mistral & LLM7),0.00,0.00,Pay-as-you-go / Free tier keys
+Cost of Goods Sold (COGS),Nodemailer SMTP Email Delivery,0.00,0.00,Gmail SMTP App Password
+Total COGS,,0.00,0.00,
+Gross Profit,,0.00,0.00,0% COGS overhead
+Operating Expenses (OPEX),Paid Marketing & Advertising,0.00,0.00,Unlaunched asset
+Operating Expenses (OPEX),Salaries & Payroll,0.00,0.00,Zero payroll overhead
+Operating Expenses (OPEX),Software & Subscriptions,0.00,0.00,Built with open-source stack
+Total OPEX,,0.00,0.00,
+Net Income (EBITDA),,0.00,0.00,Pre-revenue turnkey software code & IP

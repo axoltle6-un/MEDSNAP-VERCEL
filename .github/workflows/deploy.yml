@@ -1,0 +1,220 @@
+name: Deploy
+
+# Vercel's Git integration already builds on push. This workflow adds the
+# checks that integration does NOT run — lint, typecheck, a real production
+# build, and a secret scan — so a broken or leaky commit is caught before it
+# reaches production.
+#
+# Deployment itself is opt-in: the deploy jobs are skipped unless VERCEL_TOKEN
+# is present in repo secrets. That keeps the workflow useful (CI still runs)
+# even if you stay on Vercel's native Git integration.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # firebase-admin@14 requires Node >= 22. Building on 20 emits EBADENGINE and
+  # can fail at runtime in the Admin SDK paths (email verification, Stripe
+  # entitlement writes), so pin it explicitly.
+  NODE_VERSION: "22"
+
+jobs:
+  verify:
+    name: Lint, typecheck & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # next-auth was removed, so peers resolve cleanly. `npm ci` enforces the
+      # committed lockfile — if package.json and package-lock.json drift, this
+      # fails loudly instead of silently resolving something different.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint --if-present
+        continue-on-error: true
+
+      # next.config.ts sets typescript.ignoreBuildErrors = true, so `next build`
+      # will NOT catch type errors. Run tsc separately for real signal.
+      # Non-blocking for now: the existing codebase has pre-existing errors.
+      # Flip continue-on-error to false once they're cleared.
+      - name: Typecheck
+        run: npx tsc --noEmit
+        continue-on-error: true
+
+      - name: Build
+        run: npx next build
+        env:
+          # Public Firebase config — safe to expose; these ship in the client
+          # bundle by design. Real values come from Vercel env vars at runtime.
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # This repo previously shipped a Gmail app password, live AI keys, and
+      # base64-obfuscated Stripe keys. This gate blocks a repeat.
+      - name: Scan for committed credentials
+        run: |
+          set +e
+          PATTERNS='sk_live_[0-9a-zA-Z]{20,}|sk_test_[0-9a-zA-Z]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY|ghp_[0-9a-zA-Z]{36}|github_pat_[0-9a-zA-Z_]{20,}|xox[baprs]-[0-9a-zA-Z-]{10,}'
+          # Exclude docs that intentionally *describe* past leaks.
+          HITS=$(grep -rInE "$PATTERNS" \
+                  --exclude-dir=.git \
+                  --exclude-dir=node_modules \
+                  --exclude-dir=.next \
+                  --exclude='*.md' \
+                  . || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Potential credential committed:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "No credential patterns detected."
+
+      # Catches the base64 trick used previously ("decoded at runtime to pass
+      # GitHub secret scanning protection"). Encoding is not encryption.
+      - name: Detect base64-obfuscated secrets
+        run: |
+          set +e
+          HITS=$(grep -rIn --include='*.ts' --include='*.tsx' --include='*.js' \
+                  --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=.next \
+                  -E 'from\(\s*"[A-Za-z0-9+/]{40,}={0,2}"\s*,\s*"base64"\s*\)' . || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Base64-decoded literal found — likely an obfuscated secret:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "No base64-obfuscated literals detected."
+
+      - name: Ensure env files are not tracked
+        run: |
+          set +e
+          TRACKED=$(git ls-files | grep -E '(^|/)\.env($|\.)|firebase-service-account\.json' \
+                    | grep -v '\.env\.example' || true)
+          if [ -n "$TRACKED" ]; then
+            echo "::error::Environment/credential file is tracked by git:"
+            echo "$TRACKED"
+            exit 1
+          fi
+          echo "No env or service-account files tracked."
+
+  deploy-preview:
+    name: Deploy preview
+    needs: [verify, secret-scan]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: preview
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Skip if Vercel is not configured
+        id: guard
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+            echo "VERCEL_TOKEN not set — skipping (Vercel Git integration may handle this)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to Vercel (preview)
+        id: deploy
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npx vercel@latest pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          npx vercel@latest build --token="$VERCEL_TOKEN"
+          URL=$(npx vercel@latest deploy --prebuilt --token="$VERCEL_TOKEN")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Preview: $URL" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-production:
+    name: Deploy production
+    needs: [verify, secret-scan]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Attach a GitHub Environment with required reviewers to gate production
+    # behind manual approval (Settings -> Environments -> production).
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Skip if Vercel is not configured
+        id: guard
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+            echo "VERCEL_TOKEN not set — skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to Vercel (production)
+        id: deploy
+        if: steps.guard.outputs.configured == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npx vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx vercel@latest build --prod --token="$VERCEL_TOKEN"
+          URL=$(npx vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Production: $URL" >> "$GITHUB_STEP_SUMMARY"
+
+      # Fail the deploy if the app doesn't come up healthy.
+      - name: Smoke test
+        if: steps.guard.outputs.configured == 'true'
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          for i in 1 2 3 4 5; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL/api/health" || echo 000)
+            echo "attempt $i: /api/health -> $CODE"
+            [ "$CODE" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "::error::Health check failed after deploy"
+          exit 1

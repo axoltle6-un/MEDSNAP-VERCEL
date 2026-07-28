@@ -3,8 +3,13 @@ import { getAdminAuth } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
 
-const ENCODED_KEY = "c2tfdGVzdF81MVRxcXFqSUlFNnVPN2t2OVNaeVllTlBmdEVIMWpLRkJ0a2w1bXV4dUs1Q255alhZbWg3dzhsMnFKYW5rbzB1UkU5YWZOOUoxTVBZUEZBYUVKaXgzT0pZYzAwTGIxY1ZsdU4=";
-const DEFAULT_STRIPE_KEY = Buffer.from(ENCODED_KEY, "base64").toString("utf-8");
+/**
+ * Stripe secret key — environment only. The previously embedded base64
+ * `sk_test_...` fallback has been removed (base64 is not encryption).
+ */
+function getStripeKey(): string | null {
+  return process.env.STRIPE_SECRET_KEY || null;
+}
 
 /**
  * POST /api/stripe/webhook
@@ -16,8 +21,33 @@ const DEFAULT_STRIPE_KEY = Buffer.from(ENCODED_KEY, "base64").toString("utf-8");
  * Automatically updates user Firestore documents with active Pro subscription status!
  */
 export async function POST(req: NextRequest) {
-  const stripeKey = process.env.STRIPE_SECRET_KEY || DEFAULT_STRIPE_KEY;
+  const stripeKey = getStripeKey();
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!stripeKey) {
+    console.error("[stripe/webhook] STRIPE_SECRET_KEY is not configured");
+    return NextResponse.json({ error: "Payments not configured" }, { status: 503 });
+  }
+
+  // CRITICAL: never process an unsigned event.
+  //
+  // This route previously fell back to `JSON.parse(rawBody)` when
+  // STRIPE_WEBHOOK_SECRET was unset, meaning ANY anonymous POST could forge a
+  // `checkout.session.completed` event and grant Pro to any email for free:
+  //
+  //   curl -X POST https://<host>/api/stripe/webhook -d '{
+  //     "type":"checkout.session.completed",
+  //     "data":{"object":{"customer_email":"me@example.com",
+  //                       "metadata":{"plan":"yearly"}}}}'
+  //
+  // Signature verification is now mandatory — the endpoint fails closed.
+  if (!webhookSecret) {
+    console.error("[stripe/webhook] STRIPE_WEBHOOK_SECRET is not set — refusing to process.");
+    return NextResponse.json(
+      { error: "Webhook signature verification is not configured" },
+      { status: 503 }
+    );
+  }
 
   const Stripe = (await import("stripe")).default;
   const stripe = new Stripe(stripeKey, { apiVersion: "2023-10-16" as any });
@@ -28,12 +58,11 @@ export async function POST(req: NextRequest) {
     const rawBody = await req.text();
     const sig = req.headers.get("stripe-signature");
 
-    if (webhookSecret && sig) {
-      event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-    } else {
-      // Fallback parsing if webhook secret is not set in development
-      event = JSON.parse(rawBody);
+    if (!sig) {
+      return NextResponse.json({ error: "Missing stripe-signature header" }, { status: 400 });
     }
+
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
   } catch (err) {
     console.error("[stripe/webhook] Signature verification failed:", err);
     return NextResponse.json({ error: "Webhook signature verification failed" }, { status: 400 });

@@ -30,6 +30,7 @@ export function BrowseScreen() {
   const navigate = useAppStore((s) => s.navigate);
   const addScan = useAppStore((s) => s.addScan);
   const setCurrentResult = useAppStore((s) => s.setCurrentResult);
+  const setPendingPhotos = useAppStore((s) => s.setPendingPhotos);
   const lang = useAppStore((s) => s.settings.language);
   const [query, setQuery] = React.useState("");
   const [results, setResults] = React.useState<MedicineResult[]>([]);
@@ -77,6 +78,9 @@ export function BrowseScreen() {
 
   // Click a result → fetch FULL report from databases
   async function openResult(m: MedicineResult) {
+    // Drop any photos left over from a previous camera scan so they can't
+    // be rendered alongside this search result.
+    setPendingPhotos([]);
     setFetchingReport(true);
     toast.info("Fetching full verified report from international medical databases…");
 

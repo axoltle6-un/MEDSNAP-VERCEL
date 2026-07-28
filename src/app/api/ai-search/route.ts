@@ -29,9 +29,19 @@ Rules:
 - Do NOT fabricate. For fields you can't determine, use empty string or empty array.
 - Do NOT wrap the JSON in markdown fences.`;
 
-// API keys — from environment variables with fallback
-const LLM7_API_KEY = process.env.LLM7_API_KEY || "ZXqbHHl0NTtKGTK2m96zuDA9zYYdoezRclBRbBghbbird0P+5KvToZ7BY5ZXi8PIjT3kGPm4JqigM6TUBAGGmgjpnOSbgTzRF8JuBDT59LmEaJMWgnBS68KaJYY6irf/3t46c4izWJyvFBncEws=";
-const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || "Jd3O3M8vLUvgW90V1g5emeSODW0twJbJ";
+/**
+ * API keys — environment ONLY.
+ *
+ * Hardcoded fallback keys were removed. They shipped in a public repository,
+ * so anyone could read them and bill usage to this project's quota. If a key
+ * is missing the route degrades to verified .gov sources instead of silently
+ * using a leaked credential.
+ *
+ * Rotate any key that was ever committed — removing it from the working tree
+ * does not remove it from git history.
+ */
+const LLM7_API_KEY = process.env.LLM7_API_KEY || "";
+const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || "";
 
 export async function POST(req: NextRequest) {
   const clientIp = getClientIp(req);
@@ -80,6 +90,19 @@ export async function POST(req: NextRequest) {
     .slice(0, 2);
 
   const hasImages = imagesToSend.length > 0;
+
+  // Degrade gracefully when AI credentials are absent, rather than firing a
+  // request with an empty Bearer token and surfacing a 401 to the user.
+  const requiredKey = hasImages ? MISTRAL_API_KEY : LLM7_API_KEY;
+  if (!requiredKey) {
+    console.warn(
+      `[ai-search] ${hasImages ? "MISTRAL_API_KEY" : "LLM7_API_KEY"} not configured — using verified sources only`
+    );
+    return fallbackToVerifiedSources(
+      searchText,
+      "AI identification is unavailable — showing verified database results"
+    );
+  }
 
   try {
     let content: string;

@@ -73,8 +73,17 @@ export async function GET() {
   );
 }
 
-/** Reset usage (for testing) */
+/**
+ * Reset usage — development only.
+ *
+ * This was previously unauthenticated in production, letting anyone wipe the
+ * usage counters (hiding quota abuse) with a single DELETE request.
+ */
 export async function DELETE() {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   saveUsage({
     mistral: { calls: 0, tokens: 0, lastUsed: null },
     llm7: { calls: 0, tokens: 0, lastUsed: null },

@@ -3,9 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 20;
 
-// Base64 decoded at runtime to pass GitHub secret scanning protection
-const ENCODED_KEY = "c2tfdGVzdF81MVRxcXFqSUlFNnVPN2t2OVNaeVllTlBmdEVIMWpLRkJ0a2w1bXV4dUs1Q255alhZbWg3dzhsMnFKYW5rbzB1UkU5YWZOOUoxTVBZUEZBYUVKaXgzT0pZYzAwTGIxY1ZsdU4=";
-const DEFAULT_STRIPE_KEY = Buffer.from(ENCODED_KEY, "base64").toString("utf-8");
+/**
+ * Stripe secret key — environment only.
+ *
+ * NOTE: this file previously embedded a live-format `sk_test_...` key as
+ * base64 with the comment "decoded at runtime to pass GitHub secret scanning
+ * protection". Defeating secret scanning is not a security control — it only
+ * suppresses the warning that would have caught this. Removed.
+ */
+function getStripeKey(): string | null {
+  return process.env.STRIPE_SECRET_KEY || null;
+}
 
 /**
  * POST /api/stripe/checkout
@@ -25,7 +33,14 @@ export async function POST(req: NextRequest) {
   const plan = body.plan === "yearly" ? "yearly" : "monthly";
   const email = body.email || "";
 
-  const stripeKey = process.env.STRIPE_SECRET_KEY || DEFAULT_STRIPE_KEY;
+  const stripeKey = getStripeKey();
+  if (!stripeKey) {
+    console.error("[stripe/checkout] STRIPE_SECRET_KEY is not configured");
+    return NextResponse.json(
+      { error: "Payments are not configured on this server.", demoMode: false },
+      { status: 503 }
+    );
+  }
 
   try {
     const Stripe = (await import("stripe")).default;

@@ -71,6 +71,11 @@ export function getAuthInstance(): Auth | null {
   return _auth;
 }
 
+/** The initialised FirebaseApp — needed to attach Analytics after consent. */
+export function getAppInstance(): FirebaseApp | null {
+  return _app;
+}
+
 export function getDbInstance(): Firestore | null {
   return _db;
 }

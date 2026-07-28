@@ -9,14 +9,29 @@ import type { Transporter } from "nodemailer";
 let _transporter: Transporter | null = null;
 let _initAttempted = false;
 
+/**
+ * SMTP configuration — environment ONLY.
+ *
+ * A real Gmail address and its app password were previously hardcoded here as
+ * fallbacks. In a public repo that is full send/receive control of the mailbox
+ * that delivers this app's verification and password-reset codes — an attacker
+ * could both read those codes and send mail as MedSnap.
+ *
+ * They have been removed. Revoke the exposed app password at
+ * https://myaccount.google.com/apppasswords and issue a new one via env vars.
+ */
 const DEFAULT_SMTP_HOST = "smtp.gmail.com";
 const DEFAULT_SMTP_PORT = "587";
-const DEFAULT_SMTP_USER = "teamaxoltle@gmail.com";
-const DEFAULT_SMTP_PASS = "ppltckrommiurbrc";
-const DEFAULT_SMTP_FROM = "MedSnap <teamaxoltle@gmail.com>";
 
+/**
+ * True only when real credentials are present.
+ *
+ * Previously this returned a hardcoded `true`, which made callers believe mail
+ * was deliverable even with no configuration — so the "SMTP_NOT_CONFIGURED"
+ * dev-code path could never trigger.
+ */
 export function isEmailConfigured(): boolean {
-  return true;
+  return Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
 }
 
 async function getTransporter(): Promise<Transporter | null> {
@@ -24,12 +39,20 @@ async function getTransporter(): Promise<Transporter | null> {
   if (_initAttempted) return _transporter;
   _initAttempted = true;
 
+  // Fail closed when credentials are absent — never fall back to a baked-in
+  // mailbox. Callers treat a null transporter as SMTP_NOT_CONFIGURED and
+  // surface a dev code instead.
+  if (!isEmailConfigured()) {
+    console.warn("[email] SMTP_USER/SMTP_PASS not set — email delivery disabled");
+    return null;
+  }
+
   try {
     const nodemailer = await import("nodemailer");
     const host = process.env.SMTP_HOST || DEFAULT_SMTP_HOST;
     const portStr = process.env.SMTP_PORT || DEFAULT_SMTP_PORT;
-    const user = process.env.SMTP_USER || DEFAULT_SMTP_USER;
-    const pass = process.env.SMTP_PASS || DEFAULT_SMTP_PASS;
+    const user = process.env.SMTP_USER as string;
+    const pass = process.env.SMTP_PASS as string;
     const port = parseInt(portStr, 10);
     const secure = process.env.SMTP_SECURE === "true" || port === 465;
 
@@ -62,7 +85,7 @@ export async function sendEmail(opts: {
   }
 
   try {
-    const from = process.env.SMTP_FROM || DEFAULT_SMTP_FROM;
+    const from = process.env.SMTP_FROM || process.env.SMTP_USER || "MedSnap";
     await transporter.sendMail({
       from,
       to: opts.to,

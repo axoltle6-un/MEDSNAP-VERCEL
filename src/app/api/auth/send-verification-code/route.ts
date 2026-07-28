@@ -68,12 +68,22 @@ export async function POST(req: NextRequest) {
   }
 
   if (result.error === "SMTP_NOT_CONFIGURED") {
-    return NextResponse.json({
-      sent: false,
-      devCode: code,
-      devMode: true,
-      message: "SMTP service inactive — dev mode code issued.",
-    });
+    // Development only — see the note in send-reset-code. Returning the code
+    // in the response body would let anyone verify an email they don't own.
+    if (process.env.NODE_ENV !== "production") {
+      return NextResponse.json({
+        sent: false,
+        devCode: code,
+        devMode: true,
+        message: "SMTP service inactive — dev mode code issued (development only).",
+      });
+    }
+
+    console.error("[/api/auth/send-verification-code] SMTP is not configured in production");
+    return NextResponse.json(
+      { error: "Verification email could not be sent. Please contact support." },
+      { status: 503 }
+    );
   }
 
   return NextResponse.json(

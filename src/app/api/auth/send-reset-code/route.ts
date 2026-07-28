@@ -61,12 +61,30 @@ export async function POST(req: NextRequest) {
   }
 
   if (result.error === "SMTP_NOT_CONFIGURED") {
-    return NextResponse.json({
-      sent: false,
-      devCode: code,
-      devMode: true,
-      message: "SMTP not configured. Use the dev code shown here.",
-    });
+    // NEVER return the code to the caller in production.
+    //
+    // This path returns the password-reset code directly in the HTTP
+    // response. In production that is full account takeover: anyone could
+    // POST an arbitrary email, read `devCode` from the JSON, and reset that
+    // account's password.
+    //
+    // It was previously unreachable only because isEmailConfigured() was
+    // hardcoded to `true`. Making SMTP fail closed exposed this path, so it
+    // must be explicitly restricted to development.
+    if (process.env.NODE_ENV !== "production") {
+      return NextResponse.json({
+        sent: false,
+        devCode: code,
+        devMode: true,
+        message: "SMTP not configured. Use the dev code shown here (development only).",
+      });
+    }
+
+    console.error("[/api/auth/send-reset-code] SMTP is not configured in production");
+    return NextResponse.json(
+      { error: "Password reset email could not be sent. Please contact support." },
+      { status: 503 }
+    );
   }
 
   return NextResponse.json(

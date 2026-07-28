@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdminAuth } from "@/lib/firebase-admin";
 import { verifyCode } from "@/lib/auth-codes";
+import { getClientIp, checkRateLimit } from "@/lib/api-utils";
 
 export const runtime = "nodejs";
 export const maxDuration = 20;
@@ -24,11 +25,26 @@ export async function POST(req: NextRequest) {
 
   const email = (body.email || "").trim().toLowerCase();
   const code = (body.code || "").trim();
+  const clientIp = getClientIp(req);
 
   if (!email || !code) {
     return NextResponse.json(
       { error: "Email and code are required" },
       { status: 400 }
+    );
+  }
+
+  // Rate limit code submission.
+  //
+  // The per-code store allows 5 attempts, but an attacker could previously
+  // request a fresh code and keep guessing indefinitely — a 6-digit code is
+  // only 10^6 values. An IP cap bounds total guesses across code rotations.
+  const ipLimit = checkRateLimit(`verify-email:ip:${clientIp}`, 20, 15 * 60 * 1000);
+  const emailLimit = checkRateLimit(`verify-email:email:${email}`, 10, 15 * 60 * 1000);
+  if (!ipLimit.allowed || !emailLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many verification attempts. Please wait 15 minutes." },
+      { status: 429 }
     );
   }
 

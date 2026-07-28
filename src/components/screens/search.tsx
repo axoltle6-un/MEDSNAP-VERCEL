@@ -33,6 +33,7 @@ export function SearchScreen() {
   const screenParams = useAppStore((s) => s.screenParams);
   const addScan = useAppStore((s) => s.addScan);
   const setCurrentResult = useAppStore((s) => s.setCurrentResult);
+  const setPendingPhotos = useAppStore((s) => s.setPendingPhotos);
   const lang = useAppStore((s) => s.settings.language);
 
   const initialQuery = (screenParams["initialQuery"] as string) ?? "";
@@ -94,6 +95,8 @@ export function SearchScreen() {
   }
 
   function openResult(m: MedicineResult) {
+    // Drop leftover camera photos so they don't leak into this search result.
+    setPendingPhotos([]);
     const record = buildScanRecord(m, [], "search", m.brandName);
     addScan(record);
     setCurrentResult(m, record.id);

@@ -24,8 +24,13 @@ function isAllowedUrl(urlStr: string): boolean {
   } catch {
     return false;
   }
-  // Only allow https
-  if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+  // HTTPS only. Permitting http: allowed a downgrade to cleartext and made
+  // the private-IP checks below easier to reach via plain-HTTP internal hosts.
+  if (url.protocol !== "https:") return false;
+
+  // Reject embedded credentials (https://user:pass@host) — these can be used
+  // to confuse allowlist checks and leak auth material to the upstream host.
+  if (url.username || url.password) return false;
   // Block private/internal IPs
   const hostname = url.hostname;
   if (
@@ -68,7 +73,14 @@ export async function GET(req: NextRequest) {
         "User-Agent": "MedSnap/1.0 (https://medsnap.app; contact@medsnap.app)",
       },
       signal: AbortSignal.timeout(8000),
+      // Do not follow redirects: an allowlisted host could otherwise 302 the
+      // proxy to an internal address, bypassing isAllowedUrl() entirely.
+      redirect: "manual",
     });
+
+    if (res.status >= 300 && res.status < 400) {
+      return NextResponse.json({ error: "Redirects are not permitted" }, { status: 502 });
+    }
 
     if (!res.ok) {
       return NextResponse.json({ error: "Image fetch failed" }, { status: 502 });

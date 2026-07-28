@@ -90,9 +90,19 @@ export function ResultsScreen() {
     setZoomViewerOpen(true);
   }
 
-  // Get photos from the saved scan OR from pendingPhotos
+  // Get photos for THIS result only.
+  //
+  // A saved scan record is the source of truth — if it exists, its `photos`
+  // array is authoritative even when empty (e.g. a Browse/search result has
+  // no captured photos). Falling back to `pendingPhotos` here would leak the
+  // previously captured camera image into unrelated search results.
+  //
+  // `pendingPhotos` is only used as a fallback while a scan is still in
+  // flight and no record has been persisted yet — and only for camera scans.
   const savedScan = currentScanId ? scans.find((s) => s.id === currentScanId) : undefined;
-  const photos = savedScan?.photos?.length ? savedScan.photos : pendingPhotos;
+  const photos = savedScan
+    ? (savedScan.photos ?? [])
+    : pendingPhotos;
 
   // Build high-res image gallery array (unconditional hook call)
   const galleryImages = React.useMemo(() => {

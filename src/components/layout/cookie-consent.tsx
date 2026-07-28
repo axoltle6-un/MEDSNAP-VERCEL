@@ -6,6 +6,7 @@ import { Cookie, X } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { useHasMounted } from "@/hooks/use-has-mounted";
+import { applyConsent, readConsentCookie } from "@/lib/consent";
 
 /**
  * Cookie consent banner — shows on first visit after hydration completes.
@@ -16,10 +17,40 @@ export function CookieConsent() {
   const setCookieConsent = useAppStore((s) => s.setCookieConsent);
   const navigate = useAppStore((s) => s.navigate);
 
+  /**
+   * Enforce the stored decision on every load.
+   *
+   * The banner used to only set a value in the store — nothing read it, so
+   * "Accept" and "Reject" behaved identically. Now the choice is reconciled
+   * with a real first-party cookie and analytics is enabled/disabled to match.
+   */
+  React.useEffect(() => {
+    if (!mounted) return;
+
+    const cookieValue = readConsentCookie();
+
+    if (cookieValue) {
+      // Cookie is authoritative — re-apply it (and heal the store if needed).
+      if (cookieValue !== cookieConsent) setCookieConsent(cookieValue);
+      void applyConsent(cookieValue);
+    } else if (cookieConsent) {
+      // Store has a decision from before cookies were wired up — honour it.
+      void applyConsent(cookieConsent);
+    }
+  }, [mounted, cookieConsent, setCookieConsent]);
+
+  const decide = React.useCallback(
+    (value: "accepted" | "rejected") => {
+      setCookieConsent(value);
+      void applyConsent(value);
+    },
+    [setCookieConsent]
+  );
+
   // Prevent SSR vs Client hydration mismatch by delaying banner render until client mount
   if (!mounted) return null;
 
-  const show = cookieConsent === null;
+  const show = cookieConsent === null && readConsentCookie() === null;
 
   return (
     <AnimatePresence>
@@ -51,7 +82,7 @@ export function CookieConsent() {
                 <div className="mt-3 flex gap-2">
                   <Button
                     size="sm"
-                    onClick={() => setCookieConsent("accepted")}
+                    onClick={() => decide("accepted")}
                     className="h-9 rounded-lg px-4 text-xs font-semibold"
                   >
                     Accept all
@@ -59,7 +90,7 @@ export function CookieConsent() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setCookieConsent("rejected")}
+                    onClick={() => decide("rejected")}
                     className="h-9 rounded-lg px-4 text-xs font-medium"
                   >
                     Reject
@@ -67,7 +98,7 @@ export function CookieConsent() {
                 </div>
               </div>
               <button
-                onClick={() => setCookieConsent("rejected")}
+                onClick={() => decide("rejected")}
                 className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 aria-label="Close"
               >

@@ -307,6 +307,13 @@ async function getRxNormInteractions(rxcui: string): Promise<Interaction[]> {
 
 // ---------- 6. RxImage API ----------
 
+/**
+ * NIH RxImage (rximage.nlm.nih.gov) was decommissioned — its hostname no
+ * longer resolves. Set to true only if NLM restores it or you point the
+ * helpers at a replacement pill-image API.
+ */
+const RXIMAGE_ENABLED = false;
+
 async function searchRxImage(imprint: string, color?: string, shape?: string): Promise<RxImageResult | null> {
   try {
     let url = `https://rximage.nlm.nih.gov/api/rximage/1/rxbase?imprint=${encodeURIComponent(imprint)}&limit=1`;
@@ -414,11 +421,45 @@ function isMedicalImage(imageUrl: string, pageTitle?: string): boolean {
   return true;
 }
 
+/**
+ * Generic pharmacy/stock articles that Wikipedia's fuzzy search falls back to
+ * when it cannot match a specific drug. Their lead images are stock photos of
+ * unrelated medicines (e.g. "Capsule (pharmacy)" → green cefalexin pills), so
+ * accepting them shows the WRONG medicine to the user. Always reject.
+ */
+const GENERIC_WIKI_TITLES = [
+  "capsule (pharmacy)", "tablet (pharmacy)", "pill", "pharmacy", "medication",
+  "drug", "pharmaceutical drug", "medicine", "tablet", "capsule", "dosage form",
+  "oral administration", "combination drug", "over-the-counter drug",
+  "prescription drug", "generic drug", "pharmacology", "syrup", "suspension",
+  "cream (pharmacy)", "ointment", "suppository", "injection (medicine)",
+  "inhaler", "transdermal patch", "excipient", "active ingredient",
+];
+
+/**
+ * A Wikipedia hit is only trustworthy if its article title actually refers to
+ * the drug we asked about. Fuzzy search happily returns tangential articles.
+ */
+function wikiTitleMatchesDrug(title: string | undefined, query: string): boolean {
+  if (!title) return false;
+  const t = title.toLowerCase().trim();
+  const q = query.toLowerCase().trim();
+
+  // Reject known generic/stock articles outright.
+  if (GENERIC_WIKI_TITLES.includes(t)) return false;
+
+  // Require the drug name to appear in the title (either direction), so
+  // "Ibuprofen" matches "Ibuprofen" and "Advil" matches "Advil (brand)".
+  if (q.length < 3) return false;
+  return t.includes(q) || q.includes(t);
+}
+
 async function searchWikipediaImage(query: string): Promise<string | null> {
   try {
-    // 1. Scoped search query restricting results to medication/drug articles
+    // 1. Scoped search query restricting results to medication/drug articles.
+    //    Pull several candidates — the top hit is often a generic stock article.
     const scopedQuery = `${query} medication OR drug OR pharmaceutical OR pill`;
-    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(scopedQuery)}&gsrlimit=1&prop=pageimages&pithumbsize=400&format=json&origin=*`;
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(scopedQuery)}&gsrlimit=5&prop=pageimages&pithumbsize=400&format=json&origin=*`;
 
     const res = await fetch(searchUrl, {
       headers: {
@@ -437,7 +478,9 @@ async function searchWikipediaImage(query: string): Promise<string | null> {
           const p = pages[pid];
           const thumb = p?.thumbnail?.source;
           const title = p?.title;
-          if (thumb && isMedicalImage(thumb, title)) {
+          // Title must actually name the drug — otherwise we'd attach a photo
+          // of a completely different medicine.
+          if (thumb && wikiTitleMatchesDrug(title, query) && isMedicalImage(thumb, title)) {
             return thumb;
           }
         }
@@ -464,7 +507,7 @@ async function searchWikipediaImage(query: string): Promise<string | null> {
           const p2 = pages2[pid];
           const thumb2 = p2?.thumbnail?.source;
           const title2 = p2?.title;
-          if (thumb2 && isMedicalImage(thumb2, title2)) {
+          if (thumb2 && wikiTitleMatchesDrug(title2, query) && isMedicalImage(thumb2, title2)) {
             return thumb2;
           }
         }
@@ -488,30 +531,42 @@ async function getMedicineImage(brandName: string, genericName?: string): Promis
     .trim()
     .split(/\s+/)[0];
 
-  // 1. NIH RxImage authentic pill photos (most trustworthy)
-  if (cleanBrand && cleanBrand.length >= 3) {
+  // 1. NIH RxImage authentic pill photos.
+  //    RETIRED: rximage.nlm.nih.gov no longer resolves (NLM decommissioned the
+  //    service — DNS returns NXDOMAIN). Every call burned its full 10s timeout
+  //    before failing, then fell through to the Wikipedia branch below, which
+  //    is what produced wrong-medicine photos. Kept behind a flag for the day
+  //    a replacement endpoint appears; disabled so lookups stay fast.
+  if (RXIMAGE_ENABLED && cleanBrand && cleanBrand.length >= 3) {
     const rxImg = await searchRxImageByName(cleanBrand);
     if (rxImg && isMedicalImage(rxImg)) return rxImg;
   }
 
-  // 2. NIH PubChem 2D Chemical Structure Diagram (100% accurate for generic active chemical)
-  if (cleanGeneric && cleanGeneric.length >= 3) {
-    const pubchem = await searchPubChem(cleanGeneric);
-    if (pubchem?.imageUrl) return pubchem.imageUrl;
-  }
-
-  // 3. Scoped Wikipedia medical search for Brand Name
+  // 2. Wikipedia photo of the ACTUAL branded product, by brand name.
+  //    Preferred over a chemical diagram: users are matching what's in their
+  //    hand. Now title-gated, so a miss returns nothing instead of a stock
+  //    photo of an unrelated drug.
   if (cleanBrand && cleanBrand.length >= 3) {
     const wikiBrand = await searchWikipediaImage(cleanBrand);
     if (wikiBrand && isMedicalImage(wikiBrand)) return wikiBrand;
   }
 
-  // 4. Scoped Wikipedia medical search for Generic Name
-  if (cleanGeneric && cleanGeneric.length >= 3) {
+  // 3. Wikipedia photo by generic name (e.g. "Ibuprofen" for Advil).
+  if (cleanGeneric && cleanGeneric.length >= 3 && cleanGeneric.toLowerCase() !== cleanBrand.toLowerCase()) {
     const wikiGeneric = await searchWikipediaImage(cleanGeneric);
     if (wikiGeneric && isMedicalImage(wikiGeneric)) return wikiGeneric;
   }
 
+  // 4. NIH PubChem 2D chemical structure — always correct for the active
+  //    ingredient, but it's a molecular diagram rather than a product photo,
+  //    so it's the last resort rather than the second choice.
+  if (cleanGeneric && cleanGeneric.length >= 3) {
+    const pubchem = await searchPubChem(cleanGeneric);
+    if (pubchem?.imageUrl) return pubchem.imageUrl;
+  }
+
+  // Nothing verifiable — return null so the UI renders its own illustration
+  // instead of a misleading photo of a different medicine.
   return null;
 }
 

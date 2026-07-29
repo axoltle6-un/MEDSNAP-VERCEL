@@ -10,7 +10,7 @@ import type {
   UserProfile,
   ReportFeedback,
 } from "@/lib/types";
-import { MEDICINE_DB, searchMedicines } from "@/lib/medicine-db";
+import { MEDICINE_DB, searchMedicines, browseMedicines } from "@/lib/medicine-db";
 import {
   uploadScan,
   deleteScanFromCloud,
@@ -497,4 +497,4 @@ export function buildScanRecord(
   };
 }
 
-export { searchMedicines, MEDICINE_DB };
+export { searchMedicines, browseMedicines, MEDICINE_DB };

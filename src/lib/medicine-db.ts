@@ -458,9 +458,23 @@ export function searchMedicines(query: string, limit = 8): MedicineResult[] {
     .map((x) => x.m);
 
   if (scored.length === 0) {
-    return MEDICINE_DB.slice(0, limit);
+    // Return NOTHING when there is no match.
+    //
+    // This previously returned `MEDICINE_DB.slice(0, limit)` — the first N
+    // entries of the database. Callers that take `[0]` as "the match" then
+    // silently reported entry #1 (Tylenol / Panadol) for every unrecognised
+    // query. On a medicine identifier that means showing a confident report
+    // for the wrong drug, which is a safety defect, not a UX one.
+    //
+    // Callers that want a browse list should call browseMedicines() instead.
+    return [];
   }
   return scored;
+}
+
+/** Default listing for browse/discovery UI — explicitly NOT a search result. */
+export function browseMedicines(limit = 8): MedicineResult[] {
+  return MEDICINE_DB.slice(0, limit);
 }
 
 export function findMedicineById(id: string): MedicineResult | undefined {

@@ -697,9 +697,21 @@ export async function identifyFromVerifiedSources(
     return buildNotFoundResult("Please enter a medicine name or imprint code.");
   }
 
-  // Check built-in regional database matches first (instant DRAP / NMPA match)
+  // Check built-in regional database matches first (instant DRAP / NMPA match).
+  //
+  // The guard below previously used bare `.includes()`, so a 2-character OCR
+  // fragment matched "tylenol / panadol" as a substring and every unreadable
+  // photo was reported as Tylenol. Require a word-boundary match of at least
+  // 4 characters instead.
   const regionalMatches = searchMedicines(cleanQuery, 1);
-  if (regionalMatches.length > 0 && (regionalMatches[0]?.brandName || "").toLowerCase().includes(cleanQuery.toLowerCase())) {
+  const cq = cleanQuery.toLowerCase();
+  const cqSafe = cq.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regionalHit =
+    cq.length >= 4 &&
+    regionalMatches.length > 0 &&
+    new RegExp(`\\b${cqSafe}`, "i").test(regionalMatches[0]?.brandName || "");
+
+  if (regionalHit) {
     const matched = regionalMatches[0];
     const imgUrl = await getMedicineImage(matched.brandName, matched.genericName);
     if (imgUrl) matched.imageUrl = imgUrl;

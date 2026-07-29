@@ -8,6 +8,12 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 /**
+ * Minimum alphanumeric characters required from OCR before we attempt a match.
+ * Shorter fragments are noise and produce false identifications.
+ */
+const MIN_QUERY_LEN = 4;
+
+/**
  * Medicine identification endpoint.
  */
 export async function POST(req: NextRequest) {
@@ -47,9 +53,21 @@ export async function POST(req: NextRequest) {
   }
 
   const query = cleanQuery(rawQuery);
-  if (!query || query.length < 2) {
+
+  // Require a usable query before hitting any matcher.
+  //
+  // The old threshold was 2 characters, which let OCR fragments like "ty" or
+  // "ol" through. Those matched the built-in DB by substring (always
+  // returning Tylenol) and, once that was fixed, still produced junk from
+  // openFDA's fuzzy search — e.g. "ol" -> "%0.5 METRONIDAZOLE INFUSION".
+  // Telling the user the photo was unreadable is far safer than showing a
+  // confident report for a drug they aren't holding.
+  if (!query || query.replace(/[^a-z0-9]/gi, "").length < MIN_QUERY_LEN) {
     return NextResponse.json(
-      { error: "Could not identify a medicine name from the photo. Please type the medicine name manually." },
+      {
+        error:
+          "Could not read a medicine name from the photo. Try better lighting, hold the camera steady and closer to the label, or type the name manually.",
+      },
       { status: 400 }
     );
   }
@@ -108,22 +126,79 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/** Minimum query length before substring matching is trustworthy. */
+const MIN_MATCH_LEN = 4;
+
+/**
+ * Split a brand field like "Tylenol / Panadol" into its individual names.
+ */
+function brandAliases(brandName: string): string[] {
+  return (brandName || "")
+    .toLowerCase()
+    .split(/[\/,()]|\bor\b/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Whole-word (or word-prefix) match, so "no" cannot match "Tylenol". */
+function matchesTerm(haystack: string, term: string): boolean {
+  if (!haystack || !term || term.length < MIN_MATCH_LEN) return false;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Term must start at a word boundary — matches "panadol" and "panadol-500",
+  // but not the "no" inside "tylenol".
+  return new RegExp(`\\b${escaped}`, "i").test(haystack);
+}
+
+/**
+ * Match OCR text against the built-in database.
+ *
+ * Previously used bare `String.includes()` in both directions, which matched
+ * on any substring. Because OCR routinely emits 2-3 character fragments and
+ * "Tylenol / Panadol" is entry #1 in MEDICINE_DB, fragments like "ty", "le",
+ * "no" or "ol" all matched it — so essentially every scan reported Tylenol.
+ *
+ * Now requires a word-boundary match of at least MIN_MATCH_LEN characters,
+ * scores all candidates, and returns the best one rather than the first row
+ * that happens to contain the substring.
+ */
 function matchDB(query: string): MedicineResult | null {
   const q = (query || "").toLowerCase().trim();
+  if (q.length < MIN_MATCH_LEN) return null;
+
+  // OCR text is multi-word; test each token as well as the whole string.
+  const tokens = q.split(/\s+/).filter((t) => t.length >= MIN_MATCH_LEN);
+  const terms = Array.from(new Set([q, ...tokens]));
+
+  let best: { m: MedicineResult; score: number } | null = null;
+
   for (const m of MEDICINE_DB) {
-    const brand = (m.brandName || "").toLowerCase();
     const generic = (m.genericName || "").toLowerCase();
     const genericRoot = generic.split("(")[0].trim();
     const imprint = (m.imprint ?? "").toLowerCase();
+    let score = 0;
 
-    if (brand.includes(q) || (brand && q.includes(brand.split(" ")[0]))) return m;
-    if (generic.includes(q) || (genericRoot && q.includes(genericRoot))) return m;
-    if (imprint && (imprint.includes(q) || q.includes(imprint))) return m;
-    for (const ing of (m.activeIngredients || [])) {
-      if ((ing || "").toLowerCase().includes(q)) return m;
+    for (const term of terms) {
+      // Exact alias match is the strongest signal.
+      for (const alias of brandAliases(m.brandName)) {
+        if (alias === term) score += 100;
+        else if (matchesTerm(alias, term)) score += 60;
+      }
+      if (genericRoot && genericRoot === term) score += 90;
+      else if (matchesTerm(generic, term)) score += 50;
+
+      for (const ing of m.activeIngredients || []) {
+        if (matchesTerm((ing || "").toLowerCase(), term)) score += 30;
+      }
     }
+
+    // Imprint codes are short by nature, so compare them exactly.
+    if (imprint && terms.some((t) => t === imprint)) score += 80;
+
+    if (score > 0 && (!best || score > best.score)) best = { m, score };
   }
-  return null;
+
+  // Require a real signal, not an incidental partial hit.
+  return best && best.score >= 50 ? best.m : null;
 }
 
 function dedupeSources(sources: { label: string; url?: string }[]): { label: string; url?: string }[] {

@@ -22,7 +22,7 @@ import {
   Activity,
   Globe,
 } from "lucide-react";
-import { useAppStore, searchMedicines } from "@/lib/store";
+import { useAppStore, browseMedicines } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import {
   MedicineThumb,
@@ -49,7 +49,8 @@ export function HomeScreen() {
 
   const greeting = useGreeting();
   const userName = user?.displayName?.split(" ")[0] || user?.email?.split("@")[0] || "there";
-  const popular = React.useMemo(() => searchMedicines("", 8), []);
+  // Popular list is a browse/discovery listing, not a search result.
+  const popular = React.useMemo(() => browseMedicines(8), []);
 
   function openScan(id: string) {
     const scan = getScan(id);

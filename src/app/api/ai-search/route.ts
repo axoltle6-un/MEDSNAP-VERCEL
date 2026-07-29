@@ -78,6 +78,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // With no photo, a too-short text query cannot be identified reliably.
+  // (With a photo we still proceed — the vision model reads the label itself.)
+  if (photos.length === 0 && searchText.replace(/[^a-z0-9]/gi, "").length < 4) {
+    return NextResponse.json(
+      {
+        error:
+          "Please enter at least 4 characters of the medicine name, or add a photo of the packaging.",
+      },
+      { status: 400 }
+    );
+  }
+
   // Build the user message
   let userMessage = "Please identify this medicine and provide comprehensive information.\n";
   if (query) userMessage += `\nUser-entered name: ${query}\n`;
@@ -301,7 +313,24 @@ async function fallbackToVerifiedSources(
   }
 
   try {
-    const dbMatch = searchMedicines(searchTerm, 1);
+    // searchMedicines() now returns [] on no match. It previously returned
+    // the first rows of MEDICINE_DB, so `dbMatch[0]` was Tylenol for every
+    // unrecognised scan — reported to the user as a confident match.
+    //
+    // Also verify the hit actually corresponds to the query rather than
+    // trusting a low-scoring fuzzy result.
+    const dbMatch = searchMedicines(searchTerm, 1).filter((m) => {
+      const t = searchTerm.toLowerCase();
+      const hay = [
+        m.brandName || "",
+        m.genericName || "",
+        ...(m.activeIngredients || []),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return t.length >= 4 && new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(hay);
+    });
+
     if (dbMatch.length > 0) {
       recordUsage("verified");
       const result = {

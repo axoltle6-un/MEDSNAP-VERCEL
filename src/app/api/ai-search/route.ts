@@ -168,11 +168,20 @@ export async function POST(req: NextRequest) {
 
     if (hasImages) {
       if (!MISTRAL_API_KEY) {
-        console.error("[ai-search] MISTRAL_API_KEY not set — cannot run vision");
+        // Be explicit about the cause. "Temporarily unavailable" gave no clue
+        // that a single missing env var was responsible, which made this look
+        // like a code bug for far longer than it should have.
+        console.error(
+          "[ai-search] MISTRAL_API_KEY is not set in this environment — vision disabled. " +
+            "Set it in Vercel > Settings > Environment Variables, then redeploy."
+        );
         return NextResponse.json(
           {
             error:
-              "Photo identification is temporarily unavailable. Please type the medicine name shown on the package.",
+              "Photo scanning is not configured on the server (missing MISTRAL_API_KEY). " +
+              "Type the medicine name to search verified databases instead.",
+            code: "VISION_NOT_CONFIGURED",
+            hint: "Set MISTRAL_API_KEY in Vercel > Settings > Environment Variables, then redeploy.",
           },
           { status: 503 }
         );
@@ -270,7 +279,29 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ result });
   } catch (err) {
-    console.error("[ai-search] AI call failed:", err);
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error("[ai-search] AI call failed:", detail);
+
+    // A failed VISION call must not silently become a text search — that is
+    // how a photo of drug A ended up reported as drug B. Surface the real
+    // reason (quota, auth, timeout) so it is diagnosable.
+    if (hasImages) {
+      const isAuth = /401|403|unauthor|invalid.*key/i.test(detail);
+      const isQuota = /429|quota|rate.?limit|capacity/i.test(detail);
+      return NextResponse.json(
+        {
+          error: isAuth
+            ? "Photo scanning failed: the Mistral API key was rejected. Check MISTRAL_API_KEY in Vercel."
+            : isQuota
+              ? "Photo scanning is rate-limited right now. Wait a moment and try again, or type the medicine name."
+              : "Couldn't read the photo just now. Try again, or type the medicine name shown on the package.",
+          code: isAuth ? "VISION_AUTH_FAILED" : isQuota ? "VISION_RATE_LIMITED" : "VISION_FAILED",
+          detail: detail.slice(0, 200),
+        },
+        { status: isAuth ? 503 : 502 }
+      );
+    }
+
     return fallbackToVerifiedSources(searchText, "AI service unavailable — using verified sources");
   }
 }

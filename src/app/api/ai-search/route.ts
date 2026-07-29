@@ -158,9 +158,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "AI photo identification is not configured on this server, so the photo could not be read. Please type the medicine name to search verified databases.",
+            "Couldn't read a medicine name from that photo. Type the brand or generic name shown on the package and we'll search openFDA, RxNorm and DailyMed.",
         },
-        { status: 503 }
+        { status: 400 }
       );
     }
 
@@ -385,8 +385,25 @@ async function fallbackToVerifiedSources(
     //
     // Also verify the hit actually corresponds to the query rather than
     // trusting a low-scoring fuzzy result.
-    const dbMatch = searchMedicines(searchTerm, 1).filter((m) => {
-      const t = searchTerm.toLowerCase();
+    // Match on individual meaningful tokens, not the whole string.
+    //
+    // OCR returns full label text ("PANADOL paracetamol 500mg tablets GSK").
+    // Testing that entire string against the DB never matched, so real scans
+    // fell through to "Unable to identify". Check each non-filler token and
+    // require one to line up with a brand / generic / ingredient.
+    const candidateTokens = searchTerm
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length >= 4 && !NON_IDENTIFYING_TERMS.has(t) && !/^\d+$/.test(t));
+
+    // Search using the most distinctive token so multi-word OCR text still
+    // reaches the scorer (searchMedicines scores the whole string, which
+    // dilutes badly when 5 of 6 words are packaging boilerplate).
+    const searchKey = candidateTokens.length
+      ? candidateTokens.slice().sort((a, b) => b.length - a.length)[0]
+      : searchTerm;
+
+    const dbMatch = searchMedicines(searchKey, 1).filter((m) => {
       const hay = [
         m.brandName || "",
         m.genericName || "",
@@ -394,7 +411,9 @@ async function fallbackToVerifiedSources(
       ]
         .join(" ")
         .toLowerCase();
-      return t.length >= 4 && new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(hay);
+      return candidateTokens.some((t) =>
+        new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(hay)
+      );
     });
 
     if (dbMatch.length > 0) {
@@ -412,7 +431,9 @@ async function fallbackToVerifiedSources(
       return NextResponse.json({ result });
     }
 
-    const verifiedResult = await identifyFromVerifiedSources({ query: searchTerm });
+    // Use the distilled token here too — openFDA matches a brand name far
+    // better than a full line of OCR'd packaging text.
+    const verifiedResult = await identifyFromVerifiedSources({ query: searchKey });
     recordUsage("verified");
     console.log("[ai-search] ✓ Found via verified sources:", verifiedResult.brandName);
     return NextResponse.json({

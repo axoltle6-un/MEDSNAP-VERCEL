@@ -16,6 +16,7 @@ import {
 import { useAppStore, buildScanRecord } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import { captureNativePhoto, triggerHapticFeedback } from "@/lib/native-mobile";
+import { readTextFromImage, extractMedicineQuery } from "@/lib/ocr";
 import { toast } from "sonner";
 
 interface Photo { id: string; dataUrl: string; }
@@ -87,6 +88,61 @@ export function CaptureScreen() {
   const cameraRef = React.useRef<HTMLInputElement | null>(null);
   const galleryRef = React.useRef<HTMLInputElement | null>(null);
 
+  // --- On-device OCR -------------------------------------------------------
+  // src/lib/ocr.ts (883 lines, Tesseract) existed but was never imported, so
+  // the photo's text was never read. With no MISTRAL_API_KEY the server then
+  // fell back to searching the dosage-form dropdown ("tablet" / "solution"),
+  // and openFDA returns a confident unrelated product for those words — which
+  // is how an arbitrary photo came back as "Sodium Chloride".
+  //
+  // Running OCR here means the photo is actually read in the browser, with no
+  // API key required.
+  const [ocrText, setOcrText] = React.useState("");
+  const [ocrRunning, setOcrRunning] = React.useState(false);
+  const [ocrProgress, setOcrProgress] = React.useState(0);
+  const [ocrFailed, setOcrFailed] = React.useState(false);
+  const ocrRunId = React.useRef(0);
+
+  const runOcr = React.useCallback(async (dataUrl: string) => {
+    const runId = ++ocrRunId.current;
+    setOcrRunning(true);
+    setOcrProgress(0);
+    setOcrText("");
+    setOcrFailed(false);
+    try {
+      const text = await readTextFromImage(dataUrl, (p) => {
+        if (ocrRunId.current === runId) setOcrProgress(Math.round(p * 100));
+      });
+      if (ocrRunId.current !== runId) return;
+
+      setOcrText(text || "");
+      const { query: detected } = extractMedicineQuery(text || "");
+
+      // Only auto-fill when the user hasn't typed a name themselves.
+      if (detected && !name.trim()) {
+        setName(detected);
+        toast.success(`Read from photo: ${detected}`);
+      } else if (!detected) {
+        toast.info("Couldn't read the label clearly — type the name to be sure.");
+      }
+    } catch (err) {
+      // Tesseract downloads its wasm core and eng.traineddata at runtime. If
+      // that is blocked (CSP, offline, CDN outage) OCR cannot run at all —
+      // say so plainly rather than letting the user hit a confusing server
+      // error after pressing Analyze.
+      console.error("[capture] OCR failed:", err);
+      if (ocrRunId.current === runId) {
+        setOcrFailed(true);
+        toast.error("Couldn't read the label automatically — please type the medicine name.");
+      }
+    } finally {
+      if (ocrRunId.current === runId) {
+        setOcrRunning(false);
+        setOcrProgress(0);
+      }
+    }
+  }, [name]);
+
   function processDropFile(file: File) {
     if (!file.type.startsWith("image/")) {
       setError("Please drop a valid image file");
@@ -98,6 +154,7 @@ export function CaptureScreen() {
       compressPhoto(r.result).then((compressed) => {
         setPhoto({ id: `p-${Date.now()}`, dataUrl: compressed });
         toast.success("Image dropped & loaded!");
+        void runOcr(compressed);
       });
     };
     r.readAsDataURL(file);
@@ -112,6 +169,7 @@ export function CaptureScreen() {
       if (typeof r.result !== "string") return;
       compressPhoto(r.result).then((compressed) => {
         setPhoto({ id: `p-${Date.now()}`, dataUrl: compressed });
+        void runOcr(compressed);
       });
     };
     r.readAsDataURL(f);
@@ -135,8 +193,11 @@ export function CaptureScreen() {
    */
   function buildInfo() {
     const n = name.trim();
-    if (!n) return "";
+    // Text actually read off the label is a real identifier, so it may be sent
+    // even without a typed name. The dosage-form dropdown alone is not.
+    if (!n) return (ocrText || "").trim().slice(0, 400);
     const p: string[] = [n];
+    if (ocrText.trim()) p.push(ocrText.trim().slice(0, 300));
     if (strength.trim()) p.push(`${strength.trim()} ${unit}`);
     if (form) p.push(form);
     return p.join(" ");
@@ -144,6 +205,22 @@ export function CaptureScreen() {
 
   async function searchAI() {
     if (!canSearch) { setError("Upload a photo or enter a medicine name"); return; }
+
+    // Wait for OCR rather than sending a request with no readable text.
+    if (ocrRunning) {
+      setError("Still reading the label — one moment.");
+      return;
+    }
+
+    // A photo whose label could not be read, with no typed name, has nothing
+    // to identify. Guessing here is what produced reports for the wrong
+    // medicine, so ask for a name instead.
+    if (photo && !name.trim() && !ocrText.trim()) {
+      setError(
+        "Couldn't read any text from that photo. Retake it closer and in better light, or type the medicine name."
+      );
+      return;
+    }
 
     // Check daily scan limit
     const canScanNow = useAppStore.getState().canScan();
@@ -266,6 +343,7 @@ export function CaptureScreen() {
                 if (nativeImg) {
                   const compressed = await compressPhoto(nativeImg);
                   setPhoto({ id: `p-${Date.now()}`, dataUrl: compressed });
+                  void runOcr(compressed);
                 } else {
                   cameraRef.current?.click();
                 }
@@ -368,9 +446,51 @@ export function CaptureScreen() {
         </motion.div>
       )}
 
+      {/* OCR could not run at all (blocked CDN / offline) */}
+      {ocrFailed && !ocrText && (
+        <div className="flex items-start gap-2 rounded-xl border border-warn/30 bg-warn-soft/40 p-3 text-xs text-warn-foreground">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <strong>Automatic label reading unavailable.</strong> Type the medicine
+            name below and we&apos;ll search the verified databases.
+          </span>
+        </div>
+      )}
+
+      {/* On-device OCR status */}
+      {(ocrRunning || ocrText) && (
+        <div className="rounded-xl border border-border/60 bg-muted/40 p-3">
+          {ocrRunning ? (
+            <>
+              <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Reading the label on your device… {ocrProgress}%
+              </div>
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-border">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300"
+                  style={{ width: `${Math.max(5, ocrProgress)}%` }}
+                />
+              </div>
+            </>
+          ) : (
+            <div className="flex items-start gap-2 text-xs text-safe">
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0">
+                <strong>Label read on-device.</strong>{" "}
+                <span className="text-muted-foreground">
+                  {ocrText.replace(/\s+/g, " ").trim().slice(0, 90)}
+                  {ocrText.length > 90 ? "…" : ""}
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="space-y-2">
-        <Button onClick={searchAI} disabled={!canSearch || aiSearching} className="h-12 w-full rounded-lg text-sm font-semibold">
+        <Button onClick={searchAI} disabled={!canSearch || aiSearching || ocrRunning} className="h-12 w-full rounded-lg text-sm font-semibold">
           {aiSearching ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />AI is analyzing...</> : <><Sparkles className="mr-2 h-4 w-4" />{photo ? "AI Scan Photo" : "Search with AI"}</>}
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">

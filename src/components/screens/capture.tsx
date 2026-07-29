@@ -125,9 +125,18 @@ export function CaptureScreen() {
     if (strength.trim()) q += ` ${strength.trim()}${unit}`;
     return q.trim();
   }
+  /**
+   * Supplementary details for the AI prompt.
+   *
+   * Only include strength/form when a name was actually entered. Sending
+   * "tablet" or "solution" on its own made the server treat the dosage form
+   * as the search term, and openFDA returns a confident unrelated product for
+   * such words (this is what surfaced "Sodium Chloride" for arbitrary photos).
+   */
   function buildInfo() {
-    const p: string[] = [];
-    if (name.trim()) p.push(name.trim());
+    const n = name.trim();
+    if (!n) return "";
+    const p: string[] = [n];
     if (strength.trim()) p.push(`${strength.trim()} ${unit}`);
     if (form) p.push(form);
     return p.join(" ");

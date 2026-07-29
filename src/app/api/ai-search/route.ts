@@ -43,6 +43,39 @@ Rules:
 const LLM7_API_KEY = process.env.LLM7_API_KEY || "";
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || "";
 
+/**
+ * Words that appear on virtually every medicine package but identify nothing.
+ *
+ * openFDA's fuzzy search returns a confident product for each of these
+ * ("solution" -> a sodium chloride label, "tablet" -> a random combination
+ * product), so a query made up only of these must never reach it.
+ */
+const NON_IDENTIFYING_TERMS = new Set([
+  "tablet", "tablets", "capsule", "capsules", "caplet", "caplets", "pill", "pills",
+  "syrup", "suspension", "solution", "injection", "cream", "ointment", "gel",
+  "lotion", "spray", "drops", "inhaler", "patch", "suppository", "powder",
+  "oral", "topical", "sterile", "usp", "bp", "ip", "water", "each", "per",
+  "mg", "mcg", "ml", "gm", "gram", "grams", "unit", "units", "dose", "doses",
+  "strength", "extra", "maximum", "regular", "film", "coated", "coating",
+  "medicine", "medication", "drug", "tab", "cap", "rx", "otc", "generic",
+  "ingredients", "ingredient", "inactive", "active", "storage", "warning",
+  "warnings", "directions", "uses", "purpose", "relief", "reliever",
+]);
+
+/**
+ * True only if the text contains something that could plausibly name a
+ * medicine — i.e. at least one >=4 character token that is not pure filler.
+ */
+function isIdentifiableQuery(text: string): boolean {
+  const tokens = (text || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return tokens.some(
+    (t) => t.length >= 4 && !NON_IDENTIFYING_TERMS.has(t) && !/^\d+$/.test(t)
+  );
+}
+
 export async function POST(req: NextRequest) {
   const clientIp = getClientIp(req);
   const userToken = await verifyAuthToken(req);
@@ -110,6 +143,27 @@ export async function POST(req: NextRequest) {
     console.warn(
       `[ai-search] ${hasImages ? "MISTRAL_API_KEY" : "LLM7_API_KEY"} not configured — using verified sources only`
     );
+
+    // A photo with no usable text cannot be identified without vision.
+    //
+    // Previously this fell through to a text search on whatever `ocrText`
+    // held. The capture screen sends the dosage-form dropdown ("tablet",
+    // "solution") even when the user typed no name, and openFDA happily
+    // returns a confident product for such filler words — e.g. "solution"
+    // matched a sodium chloride label. The user then saw a detailed report
+    // for a medicine they never photographed.
+    //
+    // Say we can't identify it instead of guessing.
+    if (!isIdentifiableQuery(searchText)) {
+      return NextResponse.json(
+        {
+          error:
+            "AI photo identification is not configured on this server, so the photo could not be read. Please type the medicine name to search verified databases.",
+        },
+        { status: 503 }
+      );
+    }
+
     return fallbackToVerifiedSources(
       searchText,
       "AI identification is unavailable — showing verified database results"
@@ -284,6 +338,18 @@ async function fallbackToVerifiedSources(
 ): Promise<NextResponse> {
   const searchTerm = (query || "").trim();
   console.log("[ai-search] Falling back to verified sources for:", searchTerm || "(no text)");
+
+  // Guard the fallback itself: filler-only text ("tablet", "solution 500 mg")
+  // must not be searched, or openFDA returns an unrelated product.
+  if (searchTerm && !isIdentifiableQuery(searchTerm)) {
+    return NextResponse.json(
+      {
+        error:
+          "Could not identify a medicine name. Please type the brand or generic name shown on the package.",
+      },
+      { status: 400 }
+    );
+  }
 
   if (!searchTerm) {
     return NextResponse.json({

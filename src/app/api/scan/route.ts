@@ -14,6 +14,31 @@ export const maxDuration = 30;
 const MIN_QUERY_LEN = 4;
 
 /**
+ * Words present on nearly every package that identify no specific medicine.
+ * openFDA returns a confident (wrong) product for each of these, so a query
+ * consisting only of them must be rejected — this is what caused scans to
+ * report "Sodium Chloride" and similar unrelated labels.
+ */
+const NON_IDENTIFYING_TERMS = new Set([
+  "tablet", "tablets", "capsule", "capsules", "caplet", "caplets", "pill", "pills",
+  "syrup", "suspension", "solution", "injection", "cream", "ointment", "gel",
+  "lotion", "spray", "drops", "inhaler", "patch", "suppository", "powder",
+  "oral", "topical", "sterile", "usp", "water", "each", "per",
+  "mg", "mcg", "ml", "gm", "gram", "grams", "unit", "units", "dose", "doses",
+  "strength", "extra", "maximum", "regular", "film", "coated",
+  "medicine", "medication", "drug", "tab", "cap", "generic",
+  "ingredients", "ingredient", "inactive", "active", "storage", "warning",
+]);
+
+/** At least one >=4 char token that is not filler and not a bare number. */
+function isIdentifiableQuery(text: string): boolean {
+  const tokens = (text || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return tokens.some(
+    (t) => t.length >= 4 && !NON_IDENTIFYING_TERMS.has(t) && !/^\d+$/.test(t)
+  );
+}
+
+/**
  * Medicine identification endpoint.
  */
 export async function POST(req: NextRequest) {
@@ -62,7 +87,11 @@ export async function POST(req: NextRequest) {
   // openFDA's fuzzy search — e.g. "ol" -> "%0.5 METRONIDAZOLE INFUSION".
   // Telling the user the photo was unreadable is far safer than showing a
   // confident report for a drug they aren't holding.
-  if (!query || query.replace(/[^a-z0-9]/gi, "").length < MIN_QUERY_LEN) {
+  if (
+    !query ||
+    query.replace(/[^a-z0-9]/gi, "").length < MIN_QUERY_LEN ||
+    !isIdentifiableQuery(query)
+  ) {
     return NextResponse.json(
       {
         error:

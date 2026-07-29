@@ -18,6 +18,7 @@
 
 import type { MedicineResult, Interaction, AvoidFor } from "@/lib/types";
 import { searchMedicines } from "@/lib/medicine-db";
+import { findPakistaniBrand, brandsForGeneric, toSearchableGeneric } from "@/lib/pakistan-db";
 
 const NOT_FOUND = "Not found — please check the package insert or ask a pharmacist";
 const LLM7_API_KEY = process.env.LLM7_API_KEY || "ZXqbHHl0NTtKGTK2m96zuDA9zYYdoezRclBRbBghbbird0P+5KvToZ7BY5ZXi8PIjT3kGPm4JqigM6TUBAGGmgjpnOSbgTzRF8JuBDT59LmEaJMWgnBS68KaJYY6irf/3t46c4izWJyvFBncEws=";
@@ -753,10 +754,18 @@ export async function identifyFromVerifiedSources(
   params: IdentifyParams
 ): Promise<MedicineResult> {
   const { query, shape, color } = params;
-  const cleanQuery = query.trim();
+  let cleanQuery = query.trim();
 
   if (!cleanQuery) {
     return buildNotFoundResult("Please enter a medicine name or imprint code.");
+  }
+
+  // Pakistani brand -> generic, so the .gov lookups below can resolve it.
+  // Without this, scanning a Rigix or Myteka pack found nothing at all.
+  const pakHit = findPakistaniBrand(cleanQuery);
+  if (pakHit) {
+    console.log(`[verified] identify: "${cleanQuery}" is DRAP brand ${pakHit.brand} (${pakHit.generic})`);
+    cleanQuery = toSearchableGeneric(cleanQuery) || cleanQuery;
   }
 
   // Check built-in regional database matches first (instant DRAP / NMPA match).
@@ -988,6 +997,56 @@ export async function searchVerifiedSources(query: string): Promise<MedicineResu
 
   const results: MedicineResult[] = [];
 
+  // 0. Pakistani (DRAP) brand resolution.
+  //
+  // openFDA is a US registry and has never heard of Rigix, Myteka, Softin or
+  // Velosef, so these returned zero results while the UI claimed to search
+  // "DRAP (Pakistan)". Resolve the local brand to its INN generic first, then
+  // let the .gov pipeline enrich it with real clinical data.
+  const pakBrand = findPakistaniBrand(cleanQuery);
+  const govQuery = pakBrand ? (toSearchableGeneric(cleanQuery) || cleanQuery) : cleanQuery;
+
+  if (pakBrand) {
+    console.log(`[verified] Pakistani brand "${pakBrand.brand}" -> generic "${govQuery}"`);
+
+    // Surface the Pakistani brand itself as the primary result — it is the
+    // box the user is actually holding. Clinical detail is filled in from the
+    // .gov sources below via the generic.
+    const others = brandsForGeneric(pakBrand.generic)
+      .filter((b) => b.brand !== pakBrand.brand)
+      .map((b) => b.brand)
+      .slice(0, 6);
+
+    results.push({
+      id: `drap-${pakBrand.brand.toLowerCase().replace(/\s+/g, "-")}`,
+      brandName: pakBrand.brand,
+      genericName: pakBrand.generic,
+      manufacturer: pakBrand.manufacturer,
+      strengthValue: (pakBrand.strength || "").split(/\s/)[0] || "?",
+      strengthUnit: (pakBrand.strength || "").split(/\s/).slice(1).join(" "),
+      strengthDisplay: pakBrand.strength || "See label",
+      form: pakBrand.form || "unknown",
+      usedFor: pakBrand.usedFor?.length
+        ? pakBrand.usedFor
+        : [`See verified information for ${pakBrand.generic}`],
+      activeIngredients: [pakBrand.generic + (pakBrand.strength ? ` ${pakBrand.strength}` : "")],
+      commonSideEffects: [`See verified label data for ${pakBrand.generic}`],
+      seriousSideEffects: [],
+      interactions: [],
+      whoShouldAvoid: [],
+      storageInstructions: "Store below 30°C, protected from light and moisture.",
+      drugClass: pakBrand.drugClass,
+      confidence: "high",
+      matchNote: `Registered in Pakistan (DRAP). Generic: ${pakBrand.generic}.` +
+        (others.length ? ` Other local brands: ${others.join(", ")}.` : ""),
+      relatedMedicines: others,
+      sources: [
+        { label: "DRAP — Drug Regulatory Authority of Pakistan", url: "https://www.drap.gov.pk" },
+        { label: "Pakistan National Formulary", url: "https://www.drap.gov.pk" },
+      ],
+    } as MedicineResult);
+  }
+
   // 1. Regional & International Database Matches (DRAP Pakistan, NMPA China, Global DB)
   const localDbMatches = searchMedicines(cleanQuery, 6);
   for (const m of localDbMatches) {
@@ -1004,7 +1063,9 @@ export async function searchVerifiedSources(query: string): Promise<MedicineResu
 
   // 2. Query openFDA US Drug Label API
   try {
-    const searchTerm = encodeURIComponent(cleanQuery.toLowerCase());
+    // Use the generic when the query was a Pakistani brand — openFDA cannot
+    // resolve local brand names.
+    const searchTerm = encodeURIComponent(govQuery.toLowerCase());
     const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:"${searchTerm}"+OR+openfda.generic_name:"${searchTerm}"+OR+openfda.substance_name:"${searchTerm}"&limit=25`;
     const res = await fetch(url, {
       headers: { "User-Agent": "MedSnap/1.0" },
@@ -1018,7 +1079,7 @@ export async function searchVerifiedSources(query: string): Promise<MedicineResu
         // travel-pack listings first, so slicing the raw response surfaced
         // e.g. "Advil Dual Action ... Travel BASIX" above plain "Advil".
         const ranked = [...json.results]
-          .map((r: any) => ({ r, s: scoreOpenFDALabel(r, cleanQuery) }))
+          .map((r: any) => ({ r, s: scoreOpenFDALabel(r, govQuery) }))
           .sort((a, b) => b.s - a.s)
           .map((x) => x.r);
         const openfdaResults = ranked.slice(0, 8).map((r: any, i: number) => {

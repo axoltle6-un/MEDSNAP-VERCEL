@@ -44,6 +44,13 @@ const LLM7_API_KEY = process.env.LLM7_API_KEY || "";
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || "";
 
 /**
+ * Vision model. Pixtral is the dedicated multimodal model and reads
+ * pharmaceutical packaging more reliably than the general-purpose chat
+ * models. Overridable so the model can be rolled forward without a deploy.
+ */
+const MISTRAL_VISION_MODEL = process.env.MISTRAL_VISION_MODEL || "pixtral-12b-2409";
+
+/**
  * Words that appear on virtually every medicine package but identify nothing.
  *
  * openFDA's fuzzy search returns a confident product for each of these
@@ -160,22 +167,24 @@ export async function POST(req: NextRequest) {
     let usedVision = false;
 
     if (hasImages) {
-      if (MISTRAL_API_KEY) {
-        console.log("[ai-search] Vision via Mistral Pixtral");
-        try {
-          content = await callMistral(userMessage, imagesToSend);
-          recordUsage("mistral", content.length);
-        } catch (mistralErr) {
-          // Quota exhausted / key revoked — don't lose the scan, use keyless.
-          console.warn("[ai-search] Mistral failed, using keyless vision:", mistralErr);
-          content = await callKeylessVision(userMessage, imagesToSend);
-          recordUsage("llm7", content.length);
-        }
-      } else {
-        console.log("[ai-search] Vision via keyless LLM7 (no MISTRAL_API_KEY set)");
-        content = await callKeylessVision(userMessage, imagesToSend);
-        recordUsage("llm7", content.length);
+      if (!MISTRAL_API_KEY) {
+        console.error("[ai-search] MISTRAL_API_KEY not set — cannot run vision");
+        return NextResponse.json(
+          {
+            error:
+              "Photo identification is temporarily unavailable. Please type the medicine name shown on the package.",
+          },
+          { status: 503 }
+        );
       }
+
+      // Pixtral only. No free/keyless model fallback: a weaker model returns
+      // lower-confidence, less complete reports (missing strengths, "See
+      // label"), and silently degrading accuracy on a medical tool is worse
+      // than surfacing an error.
+      console.log(`[ai-search] Vision via ${MISTRAL_VISION_MODEL}`);
+      content = await callMistral(userMessage, imagesToSend);
+      recordUsage("mistral", content.length);
       usedVision = true;
     } else {
       console.log("[ai-search] Using LLM7 codestral (text, free)");
@@ -217,11 +226,11 @@ export async function POST(req: NextRequest) {
       brandName: (parsed.brandName as string) || "Unknown",
       genericName: (parsed.genericName as string) || NOT_FOUND,
       manufacturer: (parsed.manufacturer as string) || undefined,
-      strengthValue: (parsed.strengthValue as string) || "?",
-      strengthUnit: (parsed.strengthUnit as string) || "",
+      strengthValue: normalizeStrength(parsed.strengthValue) || "?",
+      strengthUnit: normalizeStrength(parsed.strengthUnit),
       strengthDisplay:
         parsed.strengthValue && parsed.strengthUnit
-          ? `${parsed.strengthValue} ${parsed.strengthUnit}`
+          ? formatStrength(parsed.strengthValue, parsed.strengthUnit)
           : "See label",
       form: (parsed.form as MedicineResult["form"]) || "unknown",
       packageSize: (parsed.packageSize as string) || undefined,
@@ -294,49 +303,33 @@ async function callLLM7(userMessage: string): Promise<string> {
   return json.choices?.[0]?.message?.content || "";
 }
 
+
 /**
- * Keyless vision fallback.
- *
- * LLM7 serves multimodal Gemini models without requiring an API key, so photo
- * identification keeps working even when MISTRAL_API_KEY is unset. Without
- * this the photo was silently discarded and the server fell back to a text
- * search — which is why scanning a picture appeared to do nothing.
+ * Combination products make the model return arrays for strength fields even
+ * though the schema asks for strings (e.g. ["400","60"] with
+ * ["mg (Ibuprofen)","mg (Pseudoephedrine HCl)"]). Naive interpolation produced
+ * "400,60 mg (Ibuprofen),mg (Pseudoephedrine HCl)". Normalise to readable text.
  */
-async function callKeylessVision(userMessage: string, images: string[]): Promise<string> {
-  const userContent = [
-    { type: "text", text: userMessage },
-    ...images.slice(0, 2).map((url) => ({
-      type: "image_url",
-      image_url: { url },
-    })),
-  ];
+function normalizeStrength(v: unknown): string {
+  if (Array.isArray(v)) return v.filter(Boolean).map(String).join(" + ");
+  return v == null ? "" : String(v);
+}
 
-  const res = await fetch("https://api.llm7.io/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // LLM7 accepts any bearer value on its free tier.
-      Authorization: `Bearer ${LLM7_API_KEY || "unused"}`,
-    },
-    body: JSON.stringify({
-      model: "gemini-3.1-flash-lite",
-      messages: [
-        { role: "system", content: AI_PROMPT },
-        { role: "user", content: userContent },
-      ],
-      temperature: 0.1,
-      max_tokens: 3000,
-    }),
-    signal: AbortSignal.timeout(50000),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Vision API error ${res.status}: ${errText.slice(0, 200)}`);
+/** Pair each value with its unit so combinations read "400 mg + 60 mg". */
+function formatStrength(value: unknown, unit: unknown): string {
+  const vs = Array.isArray(value) ? value.map(String) : [String(value ?? "")];
+  const us = Array.isArray(unit) ? unit.map(String) : [String(unit ?? "")];
+  if (vs.length > 1 || us.length > 1) {
+    const n = Math.max(vs.length, us.length);
+    const parts: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const v = (vs[i] ?? "").trim();
+      const u = (us[i] ?? us[0] ?? "").trim();
+      if (v || u) parts.push(`${v} ${u}`.trim());
+    }
+    return parts.join(" + ");
   }
-
-  const json = await res.json();
-  return json.choices?.[0]?.message?.content || "";
+  return `${vs[0]} ${us[0]}`.trim();
 }
 
 async function callMistral(userMessage: string, images: string[]): Promise<string> {
@@ -355,7 +348,7 @@ async function callMistral(userMessage: string, images: string[]): Promise<strin
       Authorization: `Bearer ${MISTRAL_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "pixtral-12b-2409",
+      model: MISTRAL_VISION_MODEL,
       messages: [
         { role: "system", content: AI_PROMPT },
         { role: "user", content: userContent },

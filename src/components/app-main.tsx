@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useAppStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import { useAuthBridge } from "@/lib/use-auth-bridge";
@@ -26,6 +26,8 @@ import { LegalScreen, legalKindFor } from "@/components/screens/legal";
 import { LoadingSplash } from "@/components/loading-splash";
 import type { Screen } from "@/lib/types";
 
+const EASE = [0.16, 1, 0.3, 1] as const;
+
 const FULLSCREEN_SCREENS: Screen[] = [
   "landing",
   "auth",
@@ -45,9 +47,36 @@ const PUBLIC_SCREENS: Screen[] = [
   "legal-privacy",
 ];
 
+/**
+ * Navigation depth. Moving to a deeper screen slides forward; moving to a
+ * shallower one slides back — so the motion matches the user's mental model
+ * even though this is a state machine rather than real routing.
+ */
+const DEPTH: Record<string, number> = {
+  landing: 0,
+  auth: 1,
+  "reset-password": 1,
+  "email-verification-gate": 1,
+  home: 2,
+  history: 2,
+  browse: 2,
+  settings: 2,
+  search: 3,
+  capture: 3,
+  paywall: 3,
+  analyzing: 4,
+  results: 5,
+  "result-detail": 6,
+  checkout: 4,
+  "legal-disclaimer": 7,
+  "legal-terms": 7,
+  "legal-privacy": 7,
+};
+
 export function AppMain() {
   const screen = useAppStore((s) => s.screen);
   const { user, loading } = useAuth();
+  const reduced = useReducedMotion();
 
   // Bridge Firebase Auth to Zustand store
   useAuthBridge();
@@ -57,11 +86,9 @@ export function AppMain() {
 
   let effectiveScreen: Screen = screen;
 
-  const isGoogleUser = user?.providerData?.some(
-    (p) => p.providerId === "google.com"
-  );
+  const isGoogleUser = user?.providerData?.some((p) => p.providerId === "google.com");
 
-  // Routing logic: Unauthenticated users on public screens see that screen (e.g. landing), otherwise landing
+  // Routing logic: unauthenticated users may only see public screens
   if (!user) {
     if (!PUBLIC_SCREENS.includes(effectiveScreen)) {
       effectiveScreen = "landing";
@@ -75,40 +102,76 @@ export function AppMain() {
     effectiveScreen = "email-verification-gate";
   }
 
+  const direction = useNavigationDirection(effectiveScreen);
+
   if (loading) {
-    return <LoadingSplash message="Loading MedSnap AI App…" />;
+    return <LoadingSplash message="Loading MedSnap…" />;
   }
 
   const isFullscreen = FULLSCREEN_SCREENS.includes(effectiveScreen);
   const content = renderScreen(effectiveScreen);
 
-  if (isFullscreen) {
-    return (
-      <motion.div
-        key={effectiveScreen}
-        initial={{ opacity: 0, scale: 0.995 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        className="min-h-[100dvh] w-full"
-      >
-        {content}
-      </motion.div>
+  // Reduced motion: swap instantly, no slide or fade choreography.
+  if (reduced) {
+    return isFullscreen ? (
+      <div className="min-h-[100dvh] w-full">{content}</div>
+    ) : (
+      <AppShell>
+        <div className="flex w-full flex-1 flex-col">{content}</div>
+      </AppShell>
     );
   }
 
+  if (isFullscreen) {
+    return (
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={effectiveScreen}
+          initial={{ opacity: 0, scale: 0.985, filter: "blur(6px)" }}
+          animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+          exit={{ opacity: 0, scale: 1.008, filter: "blur(6px)" }}
+          transition={{ duration: 0.34, ease: EASE }}
+          className="min-h-[100dvh] w-full"
+        >
+          {content}
+        </motion.div>
+      </AnimatePresence>
+    );
+  }
+
+  const offset = direction === "back" ? -18 : 18;
+
   return (
     <AppShell>
-      <motion.div
-        key={effectiveScreen}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        className="flex flex-1 flex-col w-full"
-      >
-        {content}
-      </motion.div>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={effectiveScreen}
+          initial={{ opacity: 0, x: offset, y: 6 }}
+          animate={{ opacity: 1, x: 0, y: 0 }}
+          exit={{ opacity: 0, x: -offset, y: -4 }}
+          transition={{ duration: 0.28, ease: EASE }}
+          className="flex w-full flex-1 flex-col"
+        >
+          {content}
+        </motion.div>
+      </AnimatePresence>
     </AppShell>
   );
+}
+
+/** Returns "forward" or "back" based on the depth delta of the last change. */
+function useNavigationDirection(screen: Screen): "forward" | "back" {
+  const previous = React.useRef<Screen>(screen);
+  const direction = React.useRef<"forward" | "back">("forward");
+
+  if (previous.current !== screen) {
+    const from = DEPTH[previous.current] ?? 0;
+    const to = DEPTH[screen] ?? 0;
+    direction.current = to < from ? "back" : "forward";
+    previous.current = screen;
+  }
+
+  return direction.current;
 }
 
 function renderScreen(screen: Screen): React.ReactNode {

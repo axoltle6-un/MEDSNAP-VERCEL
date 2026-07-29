@@ -51,6 +51,29 @@ const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || "";
 const MISTRAL_VISION_MODEL = process.env.MISTRAL_VISION_MODEL || "pixtral-12b-2409";
 
 /**
+ * OmniRoute — self-hosted OpenAI-compatible AI gateway.
+ *
+ * OmniRoute runs on the user's own machine (default http://localhost:20128)
+ * and fans a single endpoint out to whichever providers they've connected.
+ *
+ * IMPORTANT DEPLOYMENT NOTE
+ * On Vercel, "localhost" is the serverless container itself — not the
+ * developer's laptop — so a localhost base URL can never work in production.
+ * To use OmniRoute for the deployed app it must be publicly reachable
+ * (ngrok / Cloudflare Tunnel / a hosted box) and OMNIROUTE_BASE_URL set to
+ * that public HTTPS URL.
+ *
+ * Configure:
+ *   OMNIROUTE_API_KEY    required to enable
+ *   OMNIROUTE_BASE_URL   default http://localhost:20128/v1
+ *   OMNIROUTE_MODEL      default "auto" (OmniRoute picks the best connected
+ *                        vision-capable provider)
+ */
+const OMNIROUTE_API_KEY = process.env.OMNIROUTE_API_KEY || "";
+const OMNIROUTE_BASE_URL = (process.env.OMNIROUTE_BASE_URL || "http://localhost:20128/v1").replace(/\/+$/, "");
+const OMNIROUTE_MODEL = process.env.OMNIROUTE_MODEL || "auto";
+
+/**
  * Words that appear on virtually every medicine package but identify nothing.
  *
  * openFDA's fuzzy search returns a confident product for each of these
@@ -167,33 +190,51 @@ export async function POST(req: NextRequest) {
     let usedVision = false;
 
     if (hasImages) {
-      if (!MISTRAL_API_KEY) {
+      if (!OMNIROUTE_API_KEY && !MISTRAL_API_KEY) {
         // Be explicit about the cause. "Temporarily unavailable" gave no clue
         // that a single missing env var was responsible, which made this look
         // like a code bug for far longer than it should have.
         console.error(
-          "[ai-search] MISTRAL_API_KEY is not set in this environment — vision disabled. " +
-            "Set it in Vercel > Settings > Environment Variables, then redeploy."
+          "[ai-search] No vision provider configured — set OMNIROUTE_API_KEY or " +
+            "MISTRAL_API_KEY in Vercel > Settings > Environment Variables, then redeploy."
         );
         return NextResponse.json(
           {
             error:
-              "Photo scanning is not configured on the server (missing MISTRAL_API_KEY). " +
+              "Photo scanning is not configured on the server. " +
               "Type the medicine name to search verified databases instead.",
             code: "VISION_NOT_CONFIGURED",
-            hint: "Set MISTRAL_API_KEY in Vercel > Settings > Environment Variables, then redeploy.",
+            hint: "Set OMNIROUTE_API_KEY (and OMNIROUTE_BASE_URL) or MISTRAL_API_KEY in Vercel > Settings > Environment Variables, then redeploy.",
           },
           { status: 503 }
         );
       }
 
-      // Pixtral only. No free/keyless model fallback: a weaker model returns
-      // lower-confidence, less complete reports (missing strengths, "See
-      // label"), and silently degrading accuracy on a medical tool is worse
-      // than surfacing an error.
-      console.log(`[ai-search] Vision via ${MISTRAL_VISION_MODEL}`);
-      content = await callMistral(userMessage, imagesToSend);
-      recordUsage("mistral", content.length);
+      // Provider order: OmniRoute (preferred when configured) -> Mistral.
+      //
+      // Mistral is kept as an automatic fallback rather than removed: OmniRoute
+      // is typically self-hosted, so it can be unreachable (machine asleep,
+      // tunnel down, no vision-capable provider connected behind it). Falling
+      // back means a scan still succeeds instead of erroring.
+      if (OMNIROUTE_API_KEY) {
+        console.log(`[ai-search] Vision via OmniRoute (${OMNIROUTE_MODEL}) @ ${OMNIROUTE_BASE_URL}`);
+        try {
+          content = await callOmniRoute(userMessage, imagesToSend);
+          recordUsage("mistral", content.length);
+        } catch (omniErr) {
+          if (!MISTRAL_API_KEY) throw omniErr;
+          console.warn(
+            "[ai-search] OmniRoute failed, falling back to Mistral:",
+            omniErr instanceof Error ? omniErr.message : omniErr
+          );
+          content = await callMistral(userMessage, imagesToSend);
+          recordUsage("mistral", content.length);
+        }
+      } else {
+        console.log(`[ai-search] Vision via ${MISTRAL_VISION_MODEL}`);
+        content = await callMistral(userMessage, imagesToSend);
+        recordUsage("mistral", content.length);
+      }
       usedVision = true;
     } else {
       console.log("[ai-search] Using LLM7 codestral (text, free)");
@@ -361,6 +402,48 @@ function formatStrength(value: unknown, unit: unknown): string {
     return parts.join(" + ");
   }
   return `${vs[0]} ${us[0]}`.trim();
+}
+
+/**
+ * Vision via OmniRoute (OpenAI-compatible chat completions with image parts).
+ */
+async function callOmniRoute(userMessage: string, images: string[]): Promise<string> {
+  const userContent = [
+    { type: "text", text: userMessage },
+    ...images.slice(0, 2).map((url) => ({
+      type: "image_url",
+      image_url: { url },
+    })),
+  ];
+
+  const res = await fetch(`${OMNIROUTE_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OMNIROUTE_API_KEY}`,
+      // Informational headers OmniRoute uses for attribution/routing.
+      "HTTP-Referer": "https://medsnap.vercel.app",
+      "X-Title": "MedSnap",
+    },
+    body: JSON.stringify({
+      model: OMNIROUTE_MODEL,
+      messages: [
+        { role: "system", content: AI_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+    }),
+    signal: AbortSignal.timeout(55000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`OmniRoute API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const json = await res.json();
+  return json.choices?.[0]?.message?.content || "";
 }
 
 async function callMistral(userMessage: string, images: string[]): Promise<string> {

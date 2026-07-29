@@ -20,8 +20,20 @@ export async function GET() {
       // the values. Photo scanning silently 503'd with no way to tell whether
       // the key was missing, so surface it here.
       env: {
-        vision: Boolean(process.env.MISTRAL_API_KEY),
-        visionModel: process.env.MISTRAL_VISION_MODEL || "pixtral-12b-2409",
+        vision: Boolean(process.env.OMNIROUTE_API_KEY || process.env.MISTRAL_API_KEY),
+        visionProvider: process.env.OMNIROUTE_API_KEY
+          ? "omniroute"
+          : process.env.MISTRAL_API_KEY
+            ? "mistral"
+            : null,
+        visionModel: process.env.OMNIROUTE_API_KEY
+          ? process.env.OMNIROUTE_MODEL || "auto"
+          : process.env.MISTRAL_VISION_MODEL || "pixtral-12b-2409",
+        // Surfaced because a localhost base URL cannot work on Vercel — this
+        // makes that misconfiguration visible instead of silently failing.
+        omnirouteBaseUrl: process.env.OMNIROUTE_API_KEY
+          ? process.env.OMNIROUTE_BASE_URL || "http://localhost:20128/v1"
+          : null,
         aiText: Boolean(process.env.LLM7_API_KEY),
         firebase: Boolean(
           process.env.FIREBASE_SERVICE_ACCOUNT ||

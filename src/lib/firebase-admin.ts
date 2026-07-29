@@ -98,3 +98,63 @@ export async function getAdminAuth(): Promise<Auth | null> {
     return null;
   }
 }
+
+/**
+ * Server-side Firestore, authenticated with the service account.
+ *
+ * The Stripe routes previously wrote Pro entitlements through
+ * `@/lib/firestore-service`, which is the CLIENT Firestore SDK. On the server
+ * that SDK has no signed-in user, so every write was anonymous — it either
+ * silently failed under any sane security rule, or (if rules were permissive)
+ * succeeded without authentication. Either way the paid entitlement was not
+ * being written reliably after checkout.
+ *
+ * Admin writes bypass security rules using the service account, which is the
+ * correct mechanism for a trusted server granting an entitlement.
+ */
+export async function getAdminDb() {
+  // Reuse the same app instance getAdminAuth() initialises.
+  const auth = await getAdminAuth();
+  if (!auth) return null;
+
+  try {
+    const { getApps } = await import("firebase-admin/app");
+    const { getFirestore } = await import("firebase-admin/firestore");
+    const apps = getApps();
+    if (apps.length === 0) return null;
+    return getFirestore(apps[0]);
+  } catch (err) {
+    console.error("[firebase-admin] Firestore init failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Write (merge) a user document server-side. Returns false if the Admin SDK
+ * is not configured, so callers can surface a real error instead of assuming
+ * the write landed.
+ */
+export async function adminSaveUserDoc(
+  uid: string,
+  data: Record<string, unknown>
+): Promise<boolean> {
+  const db = await getAdminDb();
+  if (!db) {
+    console.error("[firebase-admin] Cannot write user doc — Admin SDK not configured");
+    return false;
+  }
+  try {
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (v !== undefined) clean[k] = v;
+    }
+    await db.collection("users").doc(uid).set(
+      { ...clean, updatedAt: new Date() },
+      { merge: true }
+    );
+    return true;
+  } catch (err) {
+    console.error("[firebase-admin] user doc write failed:", err);
+    return false;
+  }
+}

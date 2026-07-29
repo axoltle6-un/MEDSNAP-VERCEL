@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth } from "@/lib/firebase-admin";
+import { getAdminAuth, adminSaveUserDoc } from "@/lib/firebase-admin";
 import { getClientIp, checkRateLimit, verifyAuthToken } from "@/lib/api-utils";
 
 export const runtime = "nodejs";
@@ -71,12 +71,14 @@ export async function POST(req: NextRequest) {
     // Identity comes from the verified token — NOT from user-supplied input.
     const uid = userToken.uid;
 
-    const { saveUserDoc } = await import("@/lib/firestore-service");
-    await saveUserDoc(uid, {
+    const ok = await adminSaveUserDoc(uid, {
       isPro: true,
       proPlan: plan,
       proSince: Date.now(),
-    } as any);
+    });
+    if (!ok) {
+      return NextResponse.json({ error: "Failed to activate Pro" }, { status: 500 });
+    }
 
     console.log(`[stripe/demo-activate] DEV activation for uid=${uid} plan=${plan}`);
 

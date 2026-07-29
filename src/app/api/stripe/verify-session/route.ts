@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth } from "@/lib/firebase-admin";
+import { getAdminAuth, adminSaveUserDoc } from "@/lib/firebase-admin";
 import { getClientIp, checkRateLimit, verifyAuthToken } from "@/lib/api-utils";
 
 export const runtime = "nodejs";
@@ -90,17 +90,15 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const adminAuth = await getAdminAuth();
-        if (adminAuth) {
-          const { saveUserDoc } = await import("@/lib/firestore-service");
-
-          // Write against the verified uid from the token.
-          await saveUserDoc(userToken.uid, {
-            isPro: true,
-            proPlan: plan,
-            proSince: Date.now(),
-            scansToday: 0,
-          } as any);
+        // Admin SDK write against the verified uid from the token.
+        const ok = await adminSaveUserDoc(userToken.uid, {
+          isPro: true,
+          proPlan: plan,
+          proSince: Date.now(),
+          scansToday: 0,
+        });
+        if (!ok) {
+          console.error("[verify-session] Pro entitlement was NOT persisted for", userToken.uid);
         }
       } catch (dbErr) {
         console.error("[verify-session] Firestore sync error:", dbErr);

@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// MedSnap Firestore security rules.
+//
+// The project id and web API key are public (they ship in every client
+// bundle by design), so these rules are the ONLY thing protecting user data.
+// Default posture is deny-all; access is granted narrowly below.
+//
+// Deploy:  firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Fields a user must never be able to set on themselves. Entitlements are
+    // written exclusively by the server via the Admin SDK, which bypasses
+    // these rules — so a client cannot grant itself Pro by writing its own
+    // user document.
+    function noEntitlementEscalation() {
+      return !request.resource.data.diff(resource.data)
+        .affectedKeys()
+        .hasAny(['isPro', 'proPlan', 'proSince', 'stripeCustomerId', 'role']);
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+
+      // Creation must not include entitlement fields at all.
+      allow create: if isOwner(uid)
+        && !request.resource.data.keys().hasAny(
+             ['isPro', 'proPlan', 'proSince', 'stripeCustomerId', 'role']);
+
+      allow update: if isOwner(uid) && noEntitlementEscalation();
+
+      allow delete: if isOwner(uid);
+
+      // Scan history is private to its owner.
+      match /scans/{scanId} {
+        allow read, write, delete: if isOwner(uid);
+      }
+    }
+
+    // Everything else is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

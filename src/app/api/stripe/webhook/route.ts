@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth } from "@/lib/firebase-admin";
+import { getAdminAuth, adminSaveUserDoc } from "@/lib/firebase-admin";
 
 export const runtime = "nodejs";
 
@@ -124,14 +124,20 @@ async function updateUserProStatus(email: string, isPro: boolean, plan: "monthly
     if (!adminAuth) return;
 
     const userRecord = await adminAuth.getUserByEmail(email.toLowerCase().trim());
-    const { saveUserDoc } = await import("@/lib/firestore-service");
 
-    await saveUserDoc(userRecord.uid, {
+    // Admin SDK write — the client SDK has no authenticated user server-side.
+    const ok = await adminSaveUserDoc(userRecord.uid, {
       isPro,
       proPlan: plan,
       proSince: isPro ? Date.now() : null,
       scansToday: 0,
-    } as any);
+    });
+
+    if (!ok) {
+      // Throw so Stripe retries the webhook rather than treating a lost
+      // entitlement as delivered.
+      throw new Error(`Failed to persist Pro status for ${email}`);
+    }
 
     console.log(`[stripe/webhook] Updated Pro status for ${email}: isPro=${isPro}, plan=${plan}`);
   } catch (err) {

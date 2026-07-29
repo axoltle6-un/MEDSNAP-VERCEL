@@ -343,6 +343,15 @@ export const useAppStore = create<AppState>()(
             if (typeof userDoc.onboardingComplete === "boolean") {
               updates.onboardingComplete = userDoc.onboardingComplete;
             }
+
+            // Reconcile entitlement from the server on every sign-in.
+            // isPro lives in persisted localStorage, so without this a user
+            // who edited it stayed "Pro" indefinitely. The server document is
+            // authoritative and is only writable by the Admin SDK.
+            updates.isPro = Boolean((userDoc as any).isPro);
+            updates.proPlan = ((userDoc as any).proPlan ?? null) as AppState["proPlan"];
+            updates.proSince = ((userDoc as any).proSince ?? null) as AppState["proSince"];
+
             set(updates as Partial<AppState>);
           }
 
@@ -375,52 +384,23 @@ export const useAppStore = create<AppState>()(
       isPro: false,
       proPlan: null,
       proSince: null,
-      setPro: (val) => {
-        set({ isPro: val });
-        const { cloudUserId } = get();
-        if (cloudUserId) {
-          saveUserDoc(cloudUserId, {
-            profile: get().profile,
-            settings: get().settings,
-            onboardingComplete: get().onboardingComplete,
-            isPro: val,
-            proPlan: get().proPlan,
-            proSince: get().proSince,
-          } as any).catch(console.error);
-        }
-      },
+      // NOTE ON ENTITLEMENTS
+      // isPro / proPlan / proSince are a local MIRROR of server state, never
+      // the source of truth. They are written to Firestore only by the server
+      // (Admin SDK, after Stripe confirms payment) and firestore.rules blocks
+      // clients from setting them. These setters therefore update local state
+      // for immediate UI feedback and deliberately do NOT sync entitlement
+      // fields to the cloud — a client-authored write would be rejected.
+      setPro: (val) => set({ isPro: val }),
       setProPlan: (plan) => set({ proPlan: plan }),
       activatePro: (plan) => {
+        // Optimistic local unlock so the UI responds immediately after
+        // checkout. The authoritative write happens server-side in
+        // /api/stripe/verify-session and the Stripe webhook.
         const now = Date.now();
-        // Reset daily scan counter to 0 upon purchasing or renewing a subscription
         set({ isPro: true, proPlan: plan, proSince: now, scansToday: 0 });
-        const { cloudUserId } = get();
-        if (cloudUserId) {
-          saveUserDoc(cloudUserId, {
-            profile: get().profile,
-            settings: get().settings,
-            onboardingComplete: get().onboardingComplete,
-            isPro: true,
-            proPlan: plan,
-            proSince: now,
-            scansToday: 0,
-          } as any).catch(console.error);
-        }
       },
-      deactivatePro: () => {
-        set({ isPro: false, proPlan: null, proSince: null });
-        const { cloudUserId } = get();
-        if (cloudUserId) {
-          saveUserDoc(cloudUserId, {
-            profile: get().profile,
-            settings: get().settings,
-            onboardingComplete: get().onboardingComplete,
-            isPro: false,
-            proPlan: null,
-            proSince: null,
-          } as any).catch(console.error);
-        }
-      },
+      deactivatePro: () => set({ isPro: false, proPlan: null, proSince: null }),
 
       // ---------- Daily scan limits ----------
       scansToday: 0,

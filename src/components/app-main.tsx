@@ -130,7 +130,13 @@ export function AppMain() {
           initial={{ opacity: 0, scale: 0.985, filter: "blur(6px)" }}
           animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
           exit={{ opacity: 0, scale: 1.008, filter: "blur(6px)" }}
-          transition={{ duration: 0.34, ease: EASE }}
+          // Blur is GPU-expensive on mobile, so keep the fullscreen handoff
+          // brisk and let opacity finish first.
+          transition={{
+            duration: 0.3,
+            ease: EASE,
+            opacity: { duration: 0.2, ease: "easeOut" },
+          }}
           className="min-h-[100dvh] w-full"
         >
           {content}
@@ -139,17 +145,27 @@ export function AppMain() {
     );
   }
 
-  const offset = direction === "back" ? -18 : 18;
+  // Going deeper slides in from the right; going back slides in from the left,
+  // so the motion matches the mental model of a stack. Slightly larger travel
+  // than before, with a subtle depth cue (scale) so screens feel layered
+  // rather than sliding on a flat plane.
+  const offset = direction === "back" ? -26 : 26;
 
   return (
     <AppShell>
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={effectiveScreen}
-          initial={{ opacity: 0, x: offset, y: 6 }}
-          animate={{ opacity: 1, x: 0, y: 0 }}
-          exit={{ opacity: 0, x: -offset, y: -4 }}
-          transition={{ duration: 0.28, ease: EASE }}
+          initial={{ opacity: 0, x: offset, scale: 0.994 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          exit={{ opacity: 0, x: -offset * 0.55, scale: 0.997 }}
+          transition={{
+            // Spring on position for a natural settle, short tween on opacity
+            // so content never lingers half-faded.
+            x: { type: "spring", stiffness: 420, damping: 38, mass: 0.7 },
+            scale: { duration: 0.26, ease: EASE },
+            opacity: { duration: 0.18, ease: "easeOut" },
+          }}
           className="flex w-full flex-1 flex-col"
         >
           {content}

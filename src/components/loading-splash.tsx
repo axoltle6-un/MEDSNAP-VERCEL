@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Logo } from "@/components/brand/logo";
 import { Throbber, DotsThrobber, WorkingLabel } from "@/components/ui/throbber";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,16 @@ export function LoadingSplash({
   message?: string;
   className?: string;
 }) {
+  const reduced = useReducedMotion();
+
+  // Surface a hint if the app is stuck loading, rather than spinning forever
+  // with no explanation.
+  const [stalled, setStalled] = React.useState(false);
+  React.useEffect(() => {
+    const t = setTimeout(() => setStalled(true), 7000);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <div
       className={cn(
@@ -42,9 +52,13 @@ export function LoadingSplash({
       >
         {/* Mark wrapped in radar rings + orbiting ring */}
         <div className="relative flex h-28 w-28 items-center justify-center">
-          <span aria-hidden className="ping-ring" />
-          <span aria-hidden className="ping-ring ping-ring-2" />
-          <span aria-hidden className="ping-ring ping-ring-3" />
+          {!reduced && (
+            <>
+              <span aria-hidden className="ping-ring" />
+              <span aria-hidden className="ping-ring ping-ring-2" />
+              <span aria-hidden className="ping-ring ping-ring-3" />
+            </>
+          )}
           <Throbber size="xl" dual className="absolute" label={message} />
           <Logo size={44} animated showPulse />
         </div>
@@ -75,10 +89,28 @@ export function LoadingSplash({
         >
           <motion.span
             className="absolute inset-y-0 w-1/3 rounded-full bg-primary"
-            animate={{ x: ["-110%", "330%"] }}
-            transition={{ duration: 1.35, repeat: Infinity, ease: "easeInOut" }}
+            animate={reduced ? { opacity: [0.4, 1, 0.4] } : { x: ["-110%", "330%"] }}
+            transition={{
+              duration: reduced ? 1.8 : 1.35,
+              repeat: Infinity,
+              ease: "easeInOut",
+            }}
           />
         </div>
+
+        <AnimatePresence>
+          {stalled && (
+            <motion.p
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3, ease: EASE }}
+              className="mt-4 max-w-[15rem] text-center text-[11px] leading-relaxed text-muted-foreground/80"
+            >
+              Still loading — check your connection, or refresh the page.
+            </motion.p>
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );

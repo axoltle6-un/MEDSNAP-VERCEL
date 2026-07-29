@@ -212,13 +212,11 @@ export function CaptureScreen() {
       return;
     }
 
-    // A photo whose label could not be read, with no typed name, has nothing
-    // to identify. Guessing here is what produced reports for the wrong
-    // medicine, so ask for a name instead.
-    if (photo && !name.trim() && !ocrText.trim()) {
-      setError(
-        "Couldn't read any text from that photo. Retake it closer and in better light, or type the medicine name."
-      );
+    // A photo is always worth sending: the server reads it with a vision
+    // model (keyless fallback included), which is far more capable than
+    // on-device OCR. Only block when there's neither a photo nor any text.
+    if (!photo && !name.trim() && !ocrText.trim()) {
+      setError("Add a photo or type the medicine name.");
       return;
     }
 

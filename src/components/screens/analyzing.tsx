@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAppStore, buildScanRecord } from "@/lib/store";
-import { Search, ShieldCheck, X, Database, AlertTriangle } from "lucide-react";
+import { Search, ShieldCheck, X, Database, AlertTriangle, FileText } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { ProgressRing, Throbber, WorkingLabel } from "@/components/ui/throbber";
 import type { MedicineResult } from "@/lib/types";
@@ -12,10 +12,28 @@ import type { MedicineResult } from "@/lib/types";
 const EASE = [0.16, 1, 0.3, 1] as const;
 
 const STAGES = [
+  { label: "Reading your query", icon: Search },
   { label: "Searching openFDA database", icon: Database },
-  { label: "Checking RxNorm (NIH)", icon: Search },
-  { label: "Verifying with DailyMed", icon: ShieldCheck },
+  { label: "Cross-checking RxNorm & DailyMed", icon: ShieldCheck },
+  { label: "Building your report", icon: FileText },
 ] as const;
+
+/**
+ * Stage progression.
+ *
+ * Previously a setInterval advanced the checklist every 800 ms regardless of
+ * what the request was doing, so the UI claimed "Verifying with DailyMed"
+ * while the fetch may not have even resolved — and on a slow network it sat
+ * pinned at the last stage indefinitely. Stages are now driven by the real
+ * request lifecycle, with a gentle creep inside the network phase so the bar
+ * never looks frozen while genuinely waiting.
+ */
+const PHASE = {
+  START: 0,
+  FETCHING: 1,
+  PARSING: 2,
+  DONE: 3,
+} as const;
 
 export function AnalyzingScreen() {
   const navigate = useAppStore((s) => s.navigate);
@@ -25,7 +43,10 @@ export function AnalyzingScreen() {
   const addScan = useAppStore((s) => s.addScan);
   const setCurrentResult = useAppStore((s) => s.setCurrentResult);
 
-  const [stageIdx, setStageIdx] = React.useState(0);
+  const [stageIdx, setStageIdx] = React.useState(PHASE.START);
+  const [creep, setCreep] = React.useState(0);
+  const [slow, setSlow] = React.useState(false);
+  const reduced = useReducedMotion();
   const [complete, setComplete] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const startedRef = React.useRef(false);
@@ -39,11 +60,19 @@ export function AnalyzingScreen() {
     startedRef.current = true;
 
     let cancelled = false;
+    // Reassure the user if the databases are taking a while.
+    const slowTimer = setTimeout(() => {
+      if (!cancelled) setSlow(true);
+    }, 6000);
+
     async function run() {
-      const stageTimer = setInterval(() => {
+      // Creep the sub-progress while the network call is in flight so the ring
+      // keeps moving during a genuinely slow request, without ever claiming a
+      // later stage has completed.
+      const creepTimer = setInterval(() => {
         if (cancelled) return;
-        setStageIdx((i) => Math.min(i + 1, STAGES.length - 1));
-      }, 800);
+        setCreep((c) => Math.min(c + 0.035, 0.92));
+      }, 260);
 
       try {
         if (!query) {
@@ -51,12 +80,17 @@ export function AnalyzingScreen() {
           return;
         }
 
+        setStageIdx(PHASE.FETCHING);
+
         const res = await fetch("/api/scan", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query, shape, color, photos: pendingPhotos }),
         });
         if (cancelled) return;
+
+        setStageIdx(PHASE.PARSING);
+        setCreep(1);
 
         // Safe JSON parsing — handle HTML error pages
         const contentType = res.headers.get("content-type") || "";
@@ -72,7 +106,7 @@ export function AnalyzingScreen() {
         const record = buildScanRecord(result, pendingPhotos, "camera");
         addScan(record);
         setCurrentResult(result, record.id);
-        setStageIdx(STAGES.length - 1);
+        setStageIdx(PHASE.DONE);
         setComplete(true);
         setTimeout(() => {
           if (!cancelled) navigate("results");
@@ -86,20 +120,28 @@ export function AnalyzingScreen() {
             : "Something went wrong while identifying the medicine."
         );
       } finally {
-        clearInterval(stageTimer);
+        clearInterval(creepTimer);
+        clearTimeout(slowTimer);
       }
     }
     run();
     return () => {
       cancelled = true;
+      clearTimeout(slowTimer);
     };
   }, []);
 
+  // Progress reflects the actual phase; `creep` only advances *within* the
+  // network phase so a slow request still shows motion.
   const progress = complete
     ? 100
     : error
       ? 0
-      : Math.round(((stageIdx + 0.5) / STAGES.length) * 100);
+      : Math.round(
+          ((stageIdx + (stageIdx === PHASE.FETCHING ? creep : 0.35)) /
+            STAGES.length) *
+            100
+        );
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-hidden bg-background px-6">
@@ -120,7 +162,7 @@ export function AnalyzingScreen() {
       <div className="relative z-10 flex w-full max-w-xs flex-col items-center">
         {/* Radar + determinate progress ring around the brand mark */}
         <div className="relative flex h-32 w-32 items-center justify-center">
-          {!error && (
+          {!error && !reduced && (
             <>
               <span aria-hidden className="ping-ring" />
               <span aria-hidden className="ping-ring ping-ring-2" />
@@ -167,6 +209,30 @@ export function AnalyzingScreen() {
               {`“${query}”`}
             </p>
           )}
+
+          {/* Screen-reader announcement of the live stage */}
+          <span aria-live="polite" className="sr-only">
+            {error
+              ? "Analysis stopped"
+              : complete
+                ? "Match verified"
+                : STAGES[Math.min(stageIdx, STAGES.length - 1)].label}
+          </span>
+
+          {/* Only appears if the databases are genuinely slow */}
+          <AnimatePresence>
+            {slow && !complete && !error && (
+              <motion.p
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3, ease: EASE }}
+                className="mt-1 text-[11px] text-muted-foreground/80"
+              >
+                Government databases are responding slowly — hang tight.
+              </motion.p>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Stage checklist */}

@@ -136,37 +136,22 @@ export async function POST(req: NextRequest) {
 
   const hasImages = imagesToSend.length > 0;
 
-  // Degrade gracefully when AI credentials are absent, rather than firing a
-  // request with an empty Bearer token and surfacing a 401 to the user.
-  const requiredKey = hasImages ? MISTRAL_API_KEY : LLM7_API_KEY;
-  if (!requiredKey) {
-    console.warn(
-      `[ai-search] ${hasImages ? "MISTRAL_API_KEY" : "LLM7_API_KEY"} not configured — using verified sources only`
-    );
-
-    // A photo with no usable text cannot be identified without vision.
-    //
-    // Previously this fell through to a text search on whatever `ocrText`
-    // held. The capture screen sends the dosage-form dropdown ("tablet",
-    // "solution") even when the user typed no name, and openFDA happily
-    // returns a confident product for such filler words — e.g. "solution"
-    // matched a sodium chloride label. The user then saw a detailed report
-    // for a medicine they never photographed.
-    //
-    // Say we can't identify it instead of guessing.
+  // Photos are ALWAYS identifiable: Mistral Pixtral when a key is set,
+  // otherwise the keyless LLM7 vision endpoint. Text-only requests fall back
+  // to verified sources when no text provider is configured.
+  if (!hasImages && !LLM7_API_KEY) {
     if (!isIdentifiableQuery(searchText)) {
       return NextResponse.json(
         {
           error:
-            "Couldn't read a medicine name from that photo. Type the brand or generic name shown on the package and we'll search openFDA, RxNorm and DailyMed.",
+            "Couldn't read a medicine name. Type the brand or generic name shown on the package and we'll search openFDA, RxNorm and DailyMed.",
         },
         { status: 400 }
       );
     }
-
     return fallbackToVerifiedSources(
       searchText,
-      "AI identification is unavailable — showing verified database results"
+      "AI text search unavailable — showing verified database results"
     );
   }
 
@@ -175,10 +160,23 @@ export async function POST(req: NextRequest) {
     let usedVision = false;
 
     if (hasImages) {
-      console.log("[ai-search] Using Mistral Pixtral (vision, free)");
-      content = await callMistral(userMessage, imagesToSend);
+      if (MISTRAL_API_KEY) {
+        console.log("[ai-search] Vision via Mistral Pixtral");
+        try {
+          content = await callMistral(userMessage, imagesToSend);
+          recordUsage("mistral", content.length);
+        } catch (mistralErr) {
+          // Quota exhausted / key revoked — don't lose the scan, use keyless.
+          console.warn("[ai-search] Mistral failed, using keyless vision:", mistralErr);
+          content = await callKeylessVision(userMessage, imagesToSend);
+          recordUsage("llm7", content.length);
+        }
+      } else {
+        console.log("[ai-search] Vision via keyless LLM7 (no MISTRAL_API_KEY set)");
+        content = await callKeylessVision(userMessage, imagesToSend);
+        recordUsage("llm7", content.length);
+      }
       usedVision = true;
-      recordUsage("mistral", content.length);
     } else {
       console.log("[ai-search] Using LLM7 codestral (text, free)");
       content = await callLLM7(userMessage);
@@ -290,6 +288,51 @@ async function callLLM7(userMessage: string): Promise<string> {
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`LLM7 API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const json = await res.json();
+  return json.choices?.[0]?.message?.content || "";
+}
+
+/**
+ * Keyless vision fallback.
+ *
+ * LLM7 serves multimodal Gemini models without requiring an API key, so photo
+ * identification keeps working even when MISTRAL_API_KEY is unset. Without
+ * this the photo was silently discarded and the server fell back to a text
+ * search — which is why scanning a picture appeared to do nothing.
+ */
+async function callKeylessVision(userMessage: string, images: string[]): Promise<string> {
+  const userContent = [
+    { type: "text", text: userMessage },
+    ...images.slice(0, 2).map((url) => ({
+      type: "image_url",
+      image_url: { url },
+    })),
+  ];
+
+  const res = await fetch("https://api.llm7.io/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      // LLM7 accepts any bearer value on its free tier.
+      Authorization: `Bearer ${LLM7_API_KEY || "unused"}`,
+    },
+    body: JSON.stringify({
+      model: "gemini-3.1-flash-lite",
+      messages: [
+        { role: "system", content: AI_PROMPT },
+        { role: "user", content: userContent },
+      ],
+      temperature: 0.1,
+      max_tokens: 3000,
+    }),
+    signal: AbortSignal.timeout(50000),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Vision API error ${res.status}: ${errText.slice(0, 200)}`);
   }
 
   const json = await res.json();

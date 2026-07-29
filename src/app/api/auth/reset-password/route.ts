@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Rate limit attempts
-  const limit = checkRateLimit(`reset-submit:ip:${clientIp}`, 10, 15 * 60 * 1000);
+  const limit = await checkRateLimit(`reset-submit:ip:${clientIp}`, 10, 15 * 60 * 1000);
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "Too many password reset attempts. Please wait 15 minutes." },
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Constant-time hash verification against stored code
-  const verification = verifyCode("reset-password", email, code);
+  const verification = await verifyCode("reset-password", email, code);
   if (!verification.valid) {
     return NextResponse.json(
       { error: verification.error || "Invalid or expired verification code" },

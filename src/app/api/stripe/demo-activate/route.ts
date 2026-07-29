@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
   // 2. Rate limit.
   const clientIp = getClientIp(req);
-  const limit = checkRateLimit(`demo-activate:ip:${clientIp}`, 5, 15 * 60 * 1000);
+  const limit = await checkRateLimit(`demo-activate:ip:${clientIp}`, 5, 15 * 60 * 1000);
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "Too many activation attempts. Please wait." },

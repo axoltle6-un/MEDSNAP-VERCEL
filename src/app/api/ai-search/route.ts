@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
 
   // Rate Limiting: 30 searches per 15 min for verified users, 10 for unverified/anonymous
   const limitKey = userToken ? `ai-search:uid:${userToken.uid}` : `ai-search:ip:${clientIp}`;
-  const rateLimit = checkRateLimit(limitKey, userToken ? 30 : 10, 15 * 60 * 1000);
+  const rateLimit = await checkRateLimit(limitKey, userToken ? 30 : 10, 15 * 60 * 1000);
 
   if (!rateLimit.allowed) {
     return NextResponse.json(

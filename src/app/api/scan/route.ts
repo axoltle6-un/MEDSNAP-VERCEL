@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   // Rate Limiting: 60 scans per 15 min for verified users, 20 for unverified/anonymous
   const limitKey = userToken ? `scan:uid:${userToken.uid}` : `scan:ip:${clientIp}`;
-  const rateLimit = checkRateLimit(limitKey, userToken ? 60 : 20, 15 * 60 * 1000);
+  const rateLimit = await checkRateLimit(limitKey, userToken ? 60 : 20, 15 * 60 * 1000);
 
   if (!rateLimit.allowed) {
     return NextResponse.json(

@@ -40,48 +40,28 @@ export function getClientIp(req: NextRequest): string {
   return "127.0.0.1";
 }
 
-/** In-memory sliding window rate limiter */
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
-
-const rateLimitStore = new Map<string, RateLimitEntry>();
-
 /**
- * Sliding window rate limiter.
+ * Fixed-window rate limiter backed by the shared store.
  *
- * @param key Unique identifier (e.g. `auth-send:${ip}` or `reset:${email}`)
- * @param maxRequests Max allowed requests in window
- * @param windowMs Time window in milliseconds
+ * Previously a module-level `new Map()`. On serverless each instance keeps its
+ * own counters, so the effective limit was (configured limit x warm
+ * instances) — i.e. barely enforced. The shared store makes counters global,
+ * and the increment runs in a Firestore transaction so concurrent requests
+ * cannot each read the same pre-increment value.
  */
-export function checkRateLimit(
+export async function checkRateLimit(
   key: string,
   maxRequests: number,
   windowMs: number
-): { allowed: boolean; remaining: number; resetInMs: number } {
-  const now = Date.now();
-  const entry = rateLimitStore.get(key);
+): Promise<{ allowed: boolean; remaining: number; resetInMs: number }> {
+  const { incrementInWindow } = await import("@/lib/shared-store");
+  const { count, resetAt } = await incrementInWindow(`ratelimit:${key}`, windowMs);
+  const resetInMs = Math.max(0, resetAt - Date.now());
 
-  if (!entry || now > entry.resetAt) {
-    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
-    return { allowed: true, remaining: maxRequests - 1, resetInMs: windowMs };
+  if (count > maxRequests) {
+    return { allowed: false, remaining: 0, resetInMs };
   }
-
-  if (entry.count >= maxRequests) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetInMs: Math.max(0, entry.resetAt - now),
-    };
-  }
-
-  entry.count++;
-  return {
-    allowed: true,
-    remaining: maxRequests - entry.count,
-    resetInMs: Math.max(0, entry.resetAt - now),
-  };
+  return { allowed: true, remaining: Math.max(0, maxRequests - count), resetInMs };
 }
 
 /**

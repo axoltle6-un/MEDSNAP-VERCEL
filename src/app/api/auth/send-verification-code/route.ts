@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Dual Rate Limit Check: Max 5 sends per email / 10 sends per IP per 15 minutes
-  const emailLimit = checkRateLimit(`send-verify:email:${email}`, 5, 15 * 60 * 1000);
-  const ipLimit = checkRateLimit(`send-verify:ip:${clientIp}`, 10, 15 * 60 * 1000);
+  const emailLimit = await checkRateLimit(`send-verify:email:${email}`, 5, 15 * 60 * 1000);
+  const ipLimit = await checkRateLimit(`send-verify:ip:${clientIp}`, 10, 15 * 60 * 1000);
 
   if (!emailLimit.allowed || !ipLimit.allowed) {
     return NextResponse.json(
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Generate cryptographically secure 6-digit code stored as SHA-256 hash
-  const code = storeCode("verify-email", email);
+  const code = await storeCode("verify-email", email);
 
   const result = await sendVerificationCodeEmail(email, code, "verify-email");
 

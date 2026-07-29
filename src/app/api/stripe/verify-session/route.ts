@@ -30,7 +30,7 @@ function getStripeKey(): string | null {
  */
 export async function POST(req: NextRequest) {
   const clientIp = getClientIp(req);
-  const limit = checkRateLimit(`verify-session:ip:${clientIp}`, 20, 15 * 60 * 1000);
+  const limit = await checkRateLimit(`verify-session:ip:${clientIp}`, 20, 15 * 60 * 1000);
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "Too many verification attempts. Please wait." },

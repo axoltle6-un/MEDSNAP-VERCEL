@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
   // The per-code store allows 5 attempts, but an attacker could previously
   // request a fresh code and keep guessing indefinitely — a 6-digit code is
   // only 10^6 values. An IP cap bounds total guesses across code rotations.
-  const ipLimit = checkRateLimit(`verify-email:ip:${clientIp}`, 20, 15 * 60 * 1000);
-  const emailLimit = checkRateLimit(`verify-email:email:${email}`, 10, 15 * 60 * 1000);
+  const ipLimit = await checkRateLimit(`verify-email:ip:${clientIp}`, 20, 15 * 60 * 1000);
+  const emailLimit = await checkRateLimit(`verify-email:email:${email}`, 10, 15 * 60 * 1000);
   if (!ipLimit.allowed || !emailLimit.allowed) {
     return NextResponse.json(
       { error: "Too many verification attempts. Please wait 15 minutes." },
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify the code
-  const verification = verifyCode("verify-email", email, code);
+  const verification = await verifyCode("verify-email", email, code);
   if (!verification.valid) {
     return NextResponse.json(
       { error: verification.error || "Invalid verification code" },

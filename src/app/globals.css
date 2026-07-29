@@ -33,6 +33,10 @@
   --color-danger: var(--danger);
   --color-danger-foreground: var(--danger-foreground);
   --color-danger-soft: var(--danger-soft);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -80,6 +84,14 @@
   --danger: #DC3545;
   --danger-foreground: #FFFFFF;
   --danger-soft: #F8D7DA;
+
+  /* Neutral surfaces for alternating marketing sections */
+  --surface: #F8FAFC;
+  --surface-2: #F1F4F8;
+
+  /* Deep neutral ink — used for high-contrast inverted panels */
+  --ink: #0B1220;
+  --ink-soft: #1C2735;
 }
 
 /* NO dark mode */
@@ -153,32 +165,124 @@
   input[type="number"] { -moz-appearance: textfield; }
 }
 
-/* === Refined throbber — dual ring with gradient === */
+/* ==========================================================================
+   MOTION SYSTEM
+   Throbbers, loaders, scan effects, ambient backgrounds and micro-interactions.
+   Every animation here is disabled under `prefers-reduced-motion` at the
+   bottom of this file.
+   ========================================================================== */
+
+/* --- Throbbers: tapered conic ring (crisper than a border spinner) --- */
 @layer utilities {
   .throbber {
-    width: 32px;
-    height: 32px;
-    border: 2.5px solid var(--border);
-    border-top-color: var(--primary);
-    border-right-color: var(--primary);
+    --throbber-size: 32px;
+    --throbber-thickness: 3px;
+    position: relative;
+    width: var(--throbber-size);
+    height: var(--throbber-size);
     border-radius: 50%;
-    animation: throbber-spin 0.65s linear infinite;
+    background: conic-gradient(
+      from 90deg,
+      transparent 0deg,
+      color-mix(in srgb, var(--primary) 18%, transparent) 120deg,
+      color-mix(in srgb, var(--primary) 65%, transparent) 250deg,
+      var(--primary) 355deg
+    );
+    -webkit-mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - var(--throbber-thickness)),
+      #000 calc(100% - var(--throbber-thickness) + 0.5px)
+    );
+    mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - var(--throbber-thickness)),
+      #000 calc(100% - var(--throbber-thickness) + 0.5px)
+    );
+    animation: throbber-spin 0.85s cubic-bezier(0.55, 0.15, 0.45, 0.85) infinite;
   }
-  .throbber-lg {
-    width: 48px;
-    height: 48px;
-    border-width: 3.5px;
+  .throbber-xs { --throbber-size: 14px; --throbber-thickness: 2px; }
+  .throbber-sm { --throbber-size: 20px; --throbber-thickness: 2.5px; }
+  .throbber-lg { --throbber-size: 48px; --throbber-thickness: 4px; }
+  .throbber-xl { --throbber-size: 72px; --throbber-thickness: 5px; }
+
+  /* Static faint track drawn behind a throbber (place as a sibling) */
+  .throbber-track {
+    border-radius: 50%;
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--primary) 12%, transparent);
   }
-  .throbber-sm {
-    width: 20px;
-    height: 20px;
-    border-width: 2px;
-  }
+
   @keyframes throbber-spin {
     to { transform: rotate(360deg); }
   }
 
-  /* Pulsing dot — alternative loader */
+  /* --- Counter-rotating dual ring --- */
+  .throbber-dual::after {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    border-left-color: color-mix(in srgb, var(--primary) 45%, transparent);
+    animation: throbber-spin-reverse 1.15s linear infinite;
+  }
+  @keyframes throbber-spin-reverse {
+    to { transform: rotate(-360deg); }
+  }
+
+  /* --- Orbiting satellite dot --- */
+  .orbit {
+    position: relative;
+    animation: throbber-spin 1.4s linear infinite;
+  }
+  .orbit-dot {
+    position: absolute;
+    top: -3px;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    margin-left: -3.5px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--primary) 70%, transparent);
+  }
+
+  /* --- Bouncing dots --- */
+  .dots-throbber { display: inline-flex; align-items: flex-end; gap: 4px; }
+  .dots-throbber > span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: dot-bounce 1.05s ease-in-out infinite;
+  }
+  .dots-throbber > span:nth-child(2) { animation-delay: 0.14s; }
+  .dots-throbber > span:nth-child(3) { animation-delay: 0.28s; }
+  @keyframes dot-bounce {
+    0%, 70%, 100% { transform: translateY(0) scale(0.85); opacity: 0.45; }
+    35% { transform: translateY(-6px) scale(1); opacity: 1; }
+  }
+
+  /* --- Equalizer bars --- */
+  .bars-throbber { display: inline-flex; align-items: center; gap: 3px; height: 18px; }
+  .bars-throbber > span {
+    width: 3px;
+    height: 100%;
+    border-radius: 999px;
+    background: currentColor;
+    transform-origin: center;
+    animation: bar-stretch 1s ease-in-out infinite;
+  }
+  .bars-throbber > span:nth-child(2) { animation-delay: 0.12s; }
+  .bars-throbber > span:nth-child(3) { animation-delay: 0.24s; }
+  .bars-throbber > span:nth-child(4) { animation-delay: 0.36s; }
+  @keyframes bar-stretch {
+    0%, 100% { transform: scaleY(0.35); opacity: 0.5; }
+    50% { transform: scaleY(1); opacity: 1; }
+  }
+
+  /* --- Pulsing dot (legacy name, kept for existing call sites) --- */
   .pulse-dot {
     width: 10px;
     height: 10px;
@@ -191,36 +295,204 @@
     50% { transform: scale(1.2); opacity: 1; }
   }
 
-  /* Animated gradient background (for hero sections) */
-  .animated-gradient {
-    background: linear-gradient(135deg, #0D6EFD 0%, #0a58ca 50%, #0D6EFD 100%);
-    background-size: 200% 200%;
-    animation: gradient-shift 8s ease infinite;
+  /* --- Expanding "radar" rings — used behind the logo during analysis --- */
+  .ping-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid color-mix(in srgb, var(--primary) 40%, transparent);
+    animation: ping-ring-anim 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
   }
-  @keyframes gradient-shift {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
+  .ping-ring-2 { animation-delay: 0.8s; }
+  .ping-ring-3 { animation-delay: 1.6s; }
+  @keyframes ping-ring-anim {
+    0% { transform: scale(0.75); opacity: 0.7; }
+    100% { transform: scale(2.1); opacity: 0; }
+  }
+}
+
+/* --- Scanning effects (the core brand motion: a camera reading a pill) --- */
+@layer utilities {
+  /* Horizontal laser sweep across a container */
+  .scan-sweep {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--primary), transparent);
+    box-shadow: 0 0 16px 2px color-mix(in srgb, var(--primary) 55%, transparent);
+    animation: scan-sweep-anim 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  @keyframes scan-sweep-anim {
+    0%   { top: 6%;  opacity: 0; }
+    12%  { opacity: 1; }
+    50%  { top: 94%; opacity: 1; }
+    62%  { opacity: 0; }
+    100% { top: 6%;  opacity: 0; }
   }
 
-  /* Shimmer effect (for loading skeletons) */
+  /* Diagonal gloss that slides across a card on hover */
+  .sheen { position: relative; overflow: hidden; }
+  .sheen::after {
+    content: "";
+    position: absolute;
+    top: -60%;
+    left: -120%;
+    width: 60%;
+    height: 220%;
+    transform: rotate(18deg);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+    transition: left 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+  .sheen:hover::after { left: 130%; }
+
+  /* Skeleton shimmer */
   .shimmer {
     background: linear-gradient(90deg, var(--muted) 25%, var(--border) 50%, var(--muted) 75%);
     background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
+    animation: shimmer 1.5s linear infinite;
   }
   @keyframes shimmer {
     0% { background-position: 200% 0; }
     100% { background-position: -200% 0; }
   }
 
-  /* Smooth scale on hover for cards */
+  /* Text that reads as "actively working" */
+  .text-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--muted-foreground) 0%,
+      var(--foreground) 42%,
+      var(--foreground) 58%,
+      var(--muted-foreground) 100%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: text-shimmer-anim 2.4s linear infinite;
+  }
+  @keyframes text-shimmer-anim {
+    0% { background-position: 220% 0; }
+    100% { background-position: -220% 0; }
+  }
+}
+
+/* --- Ambient backgrounds --- */
+@layer utilities {
+  .animated-gradient {
+    background: linear-gradient(135deg, var(--primary) 0%, #0a58ca 50%, var(--primary) 100%);
+    background-size: 200% 200%;
+    animation: gradient-shift 8s ease infinite;
+  }
+  @keyframes gradient-shift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  /* Slow-drifting colour blooms for hero backdrops */
+  .aurora-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    will-change: transform;
+    animation: aurora-drift 18s ease-in-out infinite alternate;
+  }
+  .aurora-blob-2 { animation-duration: 24s; animation-delay: -6s; }
+  .aurora-blob-3 { animation-duration: 30s; animation-delay: -12s; }
+  @keyframes aurora-drift {
+    0%   { transform: translate3d(0, 0, 0) scale(1); }
+    50%  { transform: translate3d(4%, -6%, 0) scale(1.12); }
+    100% { transform: translate3d(-5%, 5%, 0) scale(0.95); }
+  }
+
+  /* Faint engineering grid */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, color-mix(in srgb, var(--foreground) 6%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in srgb, var(--foreground) 6%, transparent) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+  .bg-dots {
+    background-image: radial-gradient(color-mix(in srgb, var(--foreground) 12%, transparent) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* Edge fades — for marquees and scroll rails */
+  .mask-fade-x {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  }
+  .mask-fade-b {
+    -webkit-mask-image: linear-gradient(180deg, #000 60%, transparent);
+    mask-image: linear-gradient(180deg, #000 60%, transparent);
+  }
+
+  /* Infinite marquee — duplicate children once for a seamless loop */
+  .marquee-track {
+    display: flex;
+    width: max-content;
+    animation: marquee 32s linear infinite;
+  }
+  .marquee-track:hover { animation-play-state: paused; }
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+  .float-slow { animation: float-y 6s ease-in-out infinite; }
+  @keyframes float-y {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-10px); }
+  }
+}
+
+/* --- Micro-interactions --- */
+@layer utilities {
   .hover-lift {
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease;
   }
   .hover-lift:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.08), 0 4px 8px rgba(0,0,0,0.04);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.08), 0 4px 8px rgba(0,0,0,0.04);
+  }
+  .press { transition: transform 0.12s ease; }
+  .press:active { transform: scale(0.97); }
+
+  /* Underline that grows from the left on hover */
+  .link-underline {
+    position: relative;
+  }
+  .link-underline::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    height: 1.5px;
+    width: 100%;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .link-underline:hover::after { transform: scaleX(1); }
+}
+
+/* --- Accessibility: honour reduced-motion for the entire motion system --- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .throbber { animation: throbber-spin 1.2s linear infinite !important; }
+  .aurora-blob, .scan-sweep, .marquee-track, .float-slow, .ping-ring { animation: none !important; }
+  .text-shimmer {
+    -webkit-text-fill-color: var(--foreground);
+    background: none;
   }
 }
 

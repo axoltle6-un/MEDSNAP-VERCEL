@@ -132,8 +132,8 @@ export function LogoWordmark({
       <Logo size={size} animated={animated} />
       {showText && (
         <div className="leading-none text-left">
-          <p className="font-display text-lg font-extrabold tracking-tight text-slate-900">
-            Med<span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-primary bg-clip-text text-transparent">Snap</span>
+          <p className="font-display text-lg font-extrabold tracking-tight text-foreground">
+            Med<span className="gradient-text">Snap</span>
           </p>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 mt-0.5">
             AI Medicine Identifier

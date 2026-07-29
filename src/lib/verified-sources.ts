@@ -83,10 +83,71 @@ export interface IdentifyParams {
 
 // ---------- 1. openFDA Drug Label API ----------
 
+/**
+ * Score an openFDA label against the query and pick the best match.
+ *
+ * openFDA's relevance ordering is not useful for consumer identification: a
+ * search for "advil" returns 40 labels whose first entry is
+ * "Advil Dual Action with Acetaminophen, Travel BASIX" from a travel-pack
+ * repackager. Taking results[0] therefore showed a co-formulated variant from
+ * an unrecognised company instead of plain Advil.
+ *
+ * Prefer, in order:
+ *   1. Brand name that exactly equals the query.
+ *   2. Brand name that starts with the query.
+ *   3. Shorter brand names (fewer marketing/variant qualifiers).
+ *   4. Single-ingredient products over combinations.
+ * and penalise obvious repackager/travel-pack listings.
+ */
+function scoreOpenFDALabel(r: any, query: string): number {
+  const openfda = r?.openfda || {};
+  const brand = String(openfda.brand_name?.[0] || "").toLowerCase().trim();
+  const generic = String(openfda.generic_name?.[0] || "").toLowerCase().trim();
+  const mfr = String(openfda.manufacturer_name?.[0] || "").toLowerCase();
+  const q = query.toLowerCase().trim();
+  if (!brand && !generic) return -1000;
+
+  let score = 0;
+
+  if (brand === q) score += 1000;
+  else if (generic === q) score += 900;
+  else if (brand.startsWith(q + " ")) score += 400;
+  else if (new RegExp(`\\b${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(brand)) score += 200;
+  else if (brand.includes(q) || generic.includes(q)) score += 50;
+
+  // Penalise extra qualifiers: "Advil" beats "Advil Dual Action with ... Travel BASIX".
+  const extraWords = Math.max(0, brand.split(/\s+/).length - q.split(/\s+/).length);
+  score -= extraWords * 25;
+
+  // Repackagers and travel/convenience packs are rarely what a user scanned.
+  if (/(travel|basix|convenience|repack|wholesale|lil'? drug store|unit dose)/.test(brand + " " + mfr)) {
+    score -= 300;
+  }
+
+  // Combination products ("ibuprofen, acetaminophen") are more specific than
+  // the plain brand a user is most likely holding.
+  if (generic.includes(",") || generic.includes(" and ")) score -= 120;
+
+  return score;
+}
+
+/** Choose the best-matching label from an openFDA response. */
+function pickBestOpenFDALabel(results: any[], query: string): any | null {
+  if (!results?.length) return null;
+  let best: { r: any; s: number } | null = null;
+  for (const r of results) {
+    const s = scoreOpenFDALabel(r, query);
+    if (!best || s > best.s) best = { r, s };
+  }
+  return best && best.s > -1000 ? best.r : null;
+}
+
 async function searchOpenFDA(query: string): Promise<OpenFDAResult | null> {
   try {
     const searchTerm = encodeURIComponent(query.toLowerCase());
-    const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:"${searchTerm}"+OR+openfda.generic_name:"${searchTerm}"&limit=1`;
+    // Fetch a candidate set and rank locally — openFDA's own ordering puts
+    // repackager listings first (see scoreOpenFDALabel).
+    const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:"${searchTerm}"+OR+openfda.generic_name:"${searchTerm}"&limit=25`;
 
     const res = await fetch(url, {
       headers: { "User-Agent": "MedSnap/1.0" },
@@ -99,7 +160,8 @@ async function searchOpenFDA(query: string): Promise<OpenFDAResult | null> {
     const meta = json.meta?.results as { total?: number } | undefined;
     if (!meta?.total || !json.results?.length) return null;
 
-    const r = json.results[0];
+    const r = pickBestOpenFDALabel(json.results, query);
+    if (!r) return null;
     const openfda = r.openfda || {};
 
     return {
@@ -943,7 +1005,7 @@ export async function searchVerifiedSources(query: string): Promise<MedicineResu
   // 2. Query openFDA US Drug Label API
   try {
     const searchTerm = encodeURIComponent(cleanQuery.toLowerCase());
-    const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:"${searchTerm}"+OR+openfda.generic_name:"${searchTerm}"+OR+openfda.substance_name:"${searchTerm}"&limit=8`;
+    const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:"${searchTerm}"+OR+openfda.generic_name:"${searchTerm}"+OR+openfda.substance_name:"${searchTerm}"&limit=25`;
     const res = await fetch(url, {
       headers: { "User-Agent": "MedSnap/1.0" },
       signal: AbortSignal.timeout(10000),
@@ -952,7 +1014,14 @@ export async function searchVerifiedSources(query: string): Promise<MedicineResu
     if (res.ok) {
       const json = await res.json();
       if (json.results?.length) {
-        const openfdaResults = json.results.slice(0, 8).map((r: any, i: number) => {
+        // Rank locally before truncating. openFDA returns repackager and
+        // travel-pack listings first, so slicing the raw response surfaced
+        // e.g. "Advil Dual Action ... Travel BASIX" above plain "Advil".
+        const ranked = [...json.results]
+          .map((r: any) => ({ r, s: scoreOpenFDALabel(r, cleanQuery) }))
+          .sort((a, b) => b.s - a.s)
+          .map((x) => x.r);
+        const openfdaResults = ranked.slice(0, 8).map((r: any, i: number) => {
           const openfda = r.openfda || {};
           const brandName = cleanLabelText(openfda.brand_name?.[0] || cleanQuery);
           const genericName = cleanLabelText(openfda.generic_name?.[0] || openfda.substance_name?.[0] || "");

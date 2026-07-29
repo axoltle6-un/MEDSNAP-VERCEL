@@ -19,6 +19,8 @@
 import type { MedicineResult, Interaction, AvoidFor } from "@/lib/types";
 import { searchMedicines } from "@/lib/medicine-db";
 import { findPakistaniBrand, brandsForGeneric, toSearchableGeneric } from "@/lib/pakistan-db";
+import { findChineseBrand, toSearchableGenericCn, chinaBrandToResult } from "@/lib/china-db";
+import { resolveGeneric } from "@/lib/generic-resolver";
 
 const NOT_FOUND = "Not found — please check the package insert or ask a pharmacist";
 const LLM7_API_KEY = process.env.LLM7_API_KEY || "ZXqbHHl0NTtKGTK2m96zuDA9zYYdoezRclBRbBghbbird0P+5KvToZ7BY5ZXi8PIjT3kGPm4JqigM6TUBAGGmgjpnOSbgTzRF8JuBDT59LmEaJMWgnBS68KaJYY6irf/3t46c4izWJyvFBncEws=";
@@ -763,9 +765,27 @@ export async function identifyFromVerifiedSources(
   // Pakistani brand -> generic, so the .gov lookups below can resolve it.
   // Without this, scanning a Rigix or Myteka pack found nothing at all.
   const pakHit = findPakistaniBrand(cleanQuery);
+  const cnHit = pakHit ? null : findChineseBrand(cleanQuery);
+
   if (pakHit) {
     console.log(`[verified] identify: "${cleanQuery}" is DRAP brand ${pakHit.brand} (${pakHit.generic})`);
     cleanQuery = toSearchableGeneric(cleanQuery) || cleanQuery;
+  } else if (cnHit) {
+    // TCM formulas are served entirely from local data — openFDA has no
+    // equivalent and a Western "match" would be fabricated.
+    if (cnHit.tcm && !cnHit.generic) {
+      console.log(`[verified] identify: "${cleanQuery}" is TCM formula ${cnHit.brand}`);
+      return chinaBrandToResult(cnHit);
+    }
+    console.log(`[verified] identify: "${cleanQuery}" is NMPA brand ${cnHit.brand} (${cnHit.generic})`);
+    cleanQuery = toSearchableGenericCn(cleanQuery) || cleanQuery;
+  } else {
+    // Long-tail brand not in either curated table.
+    const resolved = await resolveGeneric(cleanQuery);
+    if (resolved) {
+      console.log(`[verified] identify: resolved "${cleanQuery}" -> "${resolved}"`);
+      cleanQuery = resolved;
+    }
   }
 
   // Check built-in regional database matches first (instant DRAP / NMPA match).
@@ -1004,7 +1024,30 @@ export async function searchVerifiedSources(query: string): Promise<MedicineResu
   // "DRAP (Pakistan)". Resolve the local brand to its INN generic first, then
   // let the .gov pipeline enrich it with real clinical data.
   const pakBrand = findPakistaniBrand(cleanQuery);
-  const govQuery = pakBrand ? (toSearchableGeneric(cleanQuery) || cleanQuery) : cleanQuery;
+  const cnBrand = pakBrand ? null : findChineseBrand(cleanQuery);
+
+  let govQuery = cleanQuery;
+  if (pakBrand) {
+    govQuery = toSearchableGeneric(cleanQuery) || cleanQuery;
+  } else if (cnBrand) {
+    // TCM formulas have no INN equivalent — keep the original term so we do
+    // not fabricate a Western match for a herbal formula.
+    govQuery = toSearchableGenericCn(cleanQuery) || cleanQuery;
+  } else {
+    // Long tail: brands not in either curated table. Recover the INN from the
+    // name itself (stem match) or RxNorm's spelling-tolerant endpoint, so
+    // coverage is not limited to hand-listed brands.
+    const resolved = await resolveGeneric(cleanQuery);
+    if (resolved) {
+      console.log(`[verified] resolved "${cleanQuery}" -> generic "${resolved}"`);
+      govQuery = resolved;
+    }
+  }
+
+  if (cnBrand) {
+    console.log(`[verified] Chinese brand "${cnBrand.brand}" (${cnBrand.chinese || "-"})`);
+    results.push(chinaBrandToResult(cnBrand));
+  }
 
   if (pakBrand) {
     console.log(`[verified] Pakistani brand "${pakBrand.brand}" -> generic "${govQuery}"`);

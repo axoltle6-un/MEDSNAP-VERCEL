@@ -6,6 +6,37 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  /**
+   * The app is a single-page state machine rendered from "/". Screens are
+   * mirrored into the URL (/capture, /browse, ...) via the History API, so
+   * those paths have no page.tsx of their own — a hard refresh or a shared
+   * link would 404 without this. Rewriting them to "/" lets the client adopt
+   * the path on mount (see use-url-sync.ts) and render the right screen.
+   */
+  async rewrites() {
+    const screenPaths = [
+      "/dashboard",
+      "/capture",
+      "/browse",
+      "/search",
+      "/history",
+      "/settings",
+      "/results",
+      "/results/details",
+      "/analyzing",
+      "/login",
+      "/reset-password",
+      "/verify-email",
+      "/welcome",
+      "/upgrade",
+      "/checkout",
+      "/legal/disclaimer",
+      "/legal/terms",
+      "/legal/privacy",
+    ];
+    return screenPaths.map((source) => ({ source, destination: "/" }));
+  },
+
   async headers() {
     return [
       {

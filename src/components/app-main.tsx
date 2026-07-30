@@ -6,6 +6,7 @@ import { useAppStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import { useAuthBridge } from "@/lib/use-auth-bridge";
 import { useStripeSuccess } from "@/lib/use-stripe-success";
+import { useUrlSync } from "@/lib/use-url-sync";
 import { AppShell } from "@/components/layout/app-shell";
 import { AuthScreen } from "@/components/screens/auth";
 import { LandingScreen } from "@/components/screens/landing";
@@ -83,6 +84,10 @@ export function AppMain() {
 
   // Automatic listener for returning Stripe Checkout success redirects
   useStripeSuccess();
+
+  // Mirror the current screen into the address bar (/capture, /browse, ...)
+  // and handle browser Back/Forward.
+  useUrlSync();
 
   let effectiveScreen: Screen = screen;
 

@@ -177,6 +177,9 @@ export function CaptureScreen() {
   }
 
   const canSearch = !!photo || name.trim().length > 0;
+  // Recomputed each render so the banner appears the moment the last scan is
+  // consumed, without needing a remount.
+  const outOfScans = scansRemaining() <= 0;
 
   function buildQuery() {
     let q = name.trim();
@@ -222,13 +225,19 @@ export function CaptureScreen() {
 
     // Check daily scan limit
     const canScanNow = useAppStore.getState().canScan();
-    const remaining = useAppStore.getState().scansRemaining();
     const isProUser = useAppStore.getState().isPro;
     if (!canScanNow) {
-      const limit = isProUser ? 4 : 1;
-      setError(
-        `You've used all ${limit} scans for today. ${isProUser ? "Come back tomorrow or upgrade your plan." : "Upgrade to Pro for 4 scans/day."}`
-      );
+      // Out of free scans -> send the user to the upgrade page rather than
+      // showing a dead-end red error. Previously the limit produced a
+      // sentence telling them to upgrade with no way to actually do it.
+      //
+      // Pro users who exhaust their daily allowance get a message instead:
+      // there is nothing further to sell them, so a paywall would be wrong.
+      if (isProUser) {
+        setError("You've used all 4 scans for today. Your allowance resets tomorrow.");
+        return;
+      }
+      navigate("paywall");
       return;
     }
 
@@ -486,10 +495,48 @@ export function CaptureScreen() {
         </div>
       )}
 
+      {/* Out of scans — show the upgrade path up front rather than letting
+          the user pick a photo, wait for OCR, then hit a wall. */}
+      {outOfScans && (
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 to-transparent p-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">
+                {isPro ? "Daily limit reached" : "You've used your free scan today"}
+              </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                {isPro
+                  ? "Your 4 daily scans reset tomorrow."
+                  : "Upgrade to Pro for 4 AI scans every day, allergy alerts and medical exports — or keep browsing verified medicines for free."}
+              </p>
+              {!isPro && (
+                <Button
+                  onClick={() => navigate("paywall")}
+                  className="mt-3 h-9 w-full rounded-lg text-xs font-semibold"
+                >
+                  See Pro plans
+                </Button>
+              )}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {/* Action buttons */}
       <div className="space-y-2">
-        <Button onClick={searchAI} disabled={!canSearch || aiSearching || ocrRunning} className="h-12 w-full rounded-lg text-sm font-semibold">
-          {aiSearching ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />AI is analyzing...</> : <><Sparkles className="mr-2 h-4 w-4" />{photo ? "AI Scan Photo" : "Search with AI"}</>}
+        <Button
+          onClick={searchAI}
+          disabled={!canSearch || aiSearching || ocrRunning}
+          className="h-12 w-full rounded-lg text-sm font-semibold"
+        >
+          {aiSearching ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />AI is analyzing...</> : outOfScans && !isPro ? <><Sparkles className="mr-2 h-4 w-4" />Upgrade to scan</> : <><Sparkles className="mr-2 h-4 w-4" />{photo ? "AI Scan Photo" : "Search with AI"}</>}
         </Button>
         <p className="text-center text-[11px] text-muted-foreground">
           Looking to browse medicines for free? Check the <button onClick={() => navigate("browse")} className="font-medium text-primary hover:underline">Browse</button> tab.

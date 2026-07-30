@@ -119,9 +119,18 @@ export async function readTextFromImage(
 ): Promise<string> {
   const variants = await generateVariants(imageDataUrl);
 
-  // Run OCR on ALL variants IN PARALLEL
-  const results = await Promise.all(
-    variants.map(async (variant, i) => {
+  // Run OCR SEQUENTIALLY, yielding between passes.
+  //
+  // Promise.all here did not give real parallelism -- Tesseract.js runs on the
+  // main thread in this setup, so concurrent passes just interleave and starve
+  // rendering, which is what froze the tab. One at a time, with a yield
+  // between, keeps the UI responsive and the progress bar honest.
+  const results: Array<{ text: string; score: number; words: any[]; variant: string }> = [];
+  for (let i = 0; i < variants.length; i++) {
+    const variant = variants[i];
+    // Let the browser paint before starting the next heavy pass.
+    await new Promise((r) => setTimeout(r, 0));
+    results.push(await (async () => {
       try {
         const result = await Tesseract.recognize(variant.dataUrl, "eng", {
           tessedit_pageseg_mode: variant.psm,
@@ -155,8 +164,16 @@ export async function readTextFromImage(
         console.error(`[OCR] variant ${variant.name} failed:`, err);
         return { text: "", score: 0, words: [], variant: variant.name };
       }
-    })
-  );
+    })());
+
+    // Early exit: if the first pass already read the label clearly, a second
+    // pass adds latency for no gain.
+    const last = results[results.length - 1];
+    if (last && last.score >= 60) {
+      console.log(`[OCR] early exit after ${variant.name} (score ${last.score})`);
+      break;
+    }
+  }
 
   onProgress?.(100);
 
@@ -354,7 +371,22 @@ export async function readTextFromImages(
 }
 
 /**
- * Generate 8 preprocessing variants with different techniques.
+ * How many preprocessing variants to actually OCR.
+ *
+ * The original code built 8 variants, upscaled each to 2000-4000px, and ran
+ * all 8 Tesseract passes concurrently via Promise.all. Tesseract.js has no
+ * dedicated worker here, so every pass competes for the main thread: uploading
+ * a photo locked the tab for tens of seconds on desktop and could crash it on
+ * a phone (8 x 4000px RGBA canvases is ~500 MB of pixel buffers alone).
+ *
+ * Two variants -- the two that win most often in practice -- recover nearly
+ * all the accuracy at a quarter of the cost, and they run sequentially so the
+ * browser can paint between passes.
+ */
+const MAX_OCR_VARIANTS = 2;
+
+/**
+ * Generate preprocessing variants, ordered best-first.
  */
 async function generateVariants(
   dataUrl: string
@@ -362,10 +394,11 @@ async function generateVariants(
   const img = await loadImage(dataUrl);
   const variants: { name: string; dataUrl: string; psm: string }[] = [];
 
-  // Upscale to 2000px+ for better tiny text recognition
-  const minWide = 2000;
+  // Upscale for small text, but cap far lower than before. Beyond ~1600px
+  // Tesseract accuracy plateaus while memory and CPU keep climbing.
+  const minWide = 1400;
   const scale = Math.max(1, minWide / img.width);
-  const finalScale = Math.min(scale, 4000 / img.width);
+  const finalScale = Math.min(scale, 1600 / img.width);
   const w = Math.round(img.width * finalScale);
   const h = Math.round(img.height * finalScale);
 
@@ -513,7 +546,9 @@ async function generateVariants(
     psm: "6",
   });
 
-  return variants;
+  // Only OCR the strongest few. The rest are built lazily-never: slicing here
+  // means we don't pay canvas/filter cost for variants we won't use.
+  return variants.slice(0, MAX_OCR_VARIANTS);
 }
 
 /**

@@ -135,6 +135,17 @@ function scoreOpenFDALabel(r: any, query: string): number {
 }
 
 /** Choose the best-matching label from an openFDA response. */
+/**
+ * Minimum score for an openFDA label to be accepted as a match.
+ *
+ * The old threshold (> -1000) accepted essentially anything, so when a search
+ * term had no real hits the top-scoring unrelated label was still returned as
+ * a confident full report — "Panadol" surfaced an Excedrin PM label. A match
+ * must now share the query as a whole word with the brand or generic; a
+ * merely non-negative score is not evidence of a match.
+ */
+const OPENFDA_MIN_SCORE = 50;
+
 function pickBestOpenFDALabel(results: any[], query: string): any | null {
   if (!results?.length) return null;
   let best: { r: any; s: number } | null = null;
@@ -142,7 +153,13 @@ function pickBestOpenFDALabel(results: any[], query: string): any | null {
     const s = scoreOpenFDALabel(r, query);
     if (!best || s > best.s) best = { r, s };
   }
-  return best && best.s > -1000 ? best.r : null;
+  if (!best || best.s < OPENFDA_MIN_SCORE) {
+    console.warn(
+      `[openFDA] no confident match for "${query}" (best score ${best?.s ?? "n/a"}) — rejecting`
+    );
+    return null;
+  }
+  return best.r;
 }
 
 async function searchOpenFDA(query: string): Promise<OpenFDAResult | null> {
@@ -767,6 +784,17 @@ export async function identifyFromVerifiedSources(
   const pakHit = findPakistaniBrand(cleanQuery);
   const cnHit = pakHit ? null : findChineseBrand(cleanQuery);
 
+  // Preserve the name the user actually searched. cleanQuery is rewritten to
+  // the INN below so the .gov lookups resolve, but the report should still be
+  // titled with the box in their hand — searching "Panadol" and getting a
+  // report headed "Acetaminophen" reads like the wrong medicine.
+  const localBrandLabel = pakHit
+    ? pakHit.brand
+    : cnHit
+      ? (cnHit.chinese ? `${cnHit.brand} (${cnHit.chinese})` : cnHit.brand)
+      : null;
+  const localManufacturer = pakHit?.manufacturer || cnHit?.manufacturer;
+
   if (pakHit) {
     console.log(`[verified] identify: "${cleanQuery}" is DRAP brand ${pakHit.brand} (${pakHit.generic})`);
     cleanQuery = toSearchableGeneric(cleanQuery) || cleanQuery;
@@ -932,6 +960,21 @@ export async function identifyFromVerifiedSources(
   }
 
   const rawResult = assembleResult(openfda, rxnorm, rxImage, dailymed, interactions, sources, cleanQuery, shape, color, rxClass, pubchem);
+
+  // Restore the local brand the user searched for. The .gov lookups were run
+  // against the INN, so the assembled report is titled with the US generic;
+  // showing "Acetaminophen" for a Panadol search looks like a wrong result.
+  if (localBrandLabel) {
+    const inn = rawResult.brandName;
+    rawResult.brandName = localBrandLabel;
+    if (!rawResult.genericName || rawResult.genericName === NOT_FOUND) {
+      rawResult.genericName = inn;
+    }
+    if (localManufacturer) rawResult.manufacturer = localManufacturer;
+    rawResult.matchNote =
+      `${localBrandLabel} — clinical data verified via ${inn} (openFDA/RxNorm/DailyMed). ` +
+      (rawResult.matchNote || "");
+  }
 
   if (fdaRecalls?.length) {
     rawResult.warningsRaw = `FDA Safety Notice: ${fdaRecalls.join(" · ")}`;

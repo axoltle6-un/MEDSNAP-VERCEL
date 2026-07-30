@@ -405,9 +405,60 @@ export function brandsForGeneric(generic: string): PakBrand[] {
  * Cetirizine. Translating the brand to its generic is what makes Pakistani
  * medicines resolvable at all.
  */
+/**
+ * INN names that differ between the WHO/Commonwealth naming used in Pakistan
+ * and the USAN naming openFDA indexes. Searching the wrong one returns zero
+ * results and the pipeline then falls through to an unrelated product —
+ * e.g. "Panadol" -> "Paracetamol" -> 0 openFDA hits -> a random Excedrin
+ * label was surfaced as the full report.
+ */
+const USAN_EQUIVALENT: Record<string, string> = {
+  paracetamol: "acetaminophen",
+  adrenaline: "epinephrine",
+  noradrenaline: "norepinephrine",
+  salbutamol: "albuterol",
+  frusemide: "furosemide",
+  lignocaine: "lidocaine",
+  amoxycillin: "amoxicillin",
+  cephalexin: "cefalexin",
+  rifampicin: "rifampin",
+  glibenclamide: "glyburide",
+  glyceryl: "nitroglycerin",
+  pethidine: "meperidine",
+  hyoscine: "scopolamine",
+  bendrofluazide: "bendroflumethiazide",
+  dothiepin: "dosulepin",
+  trimeprazine: "alimemazine",
+  thyroxine: "levothyroxine",
+  oestradiol: "estradiol",
+  ciclosporin: "cyclosporine",
+  colecalciferol: "cholecalciferol",
+  beclometasone: "beclomethasone",
+  chlorphenamine: "chlorpheniramine",
+  phenobarbitone: "phenobarbital",
+  methylthioninium: "methylene blue",
+};
+
+/**
+ * Best search term for the .gov pipeline.
+ *
+ * openFDA/RxNorm/DailyMed have never heard of "Rigix", but they know
+ * Cetirizine. Translating the brand to its generic is what makes Pakistani
+ * medicines resolvable at all — and the USAN map above ensures the generic we
+ * hand over is the spelling those US databases actually index.
+ */
 export function toSearchableGeneric(query: string): string | null {
   const b = findPakistaniBrand(query);
   if (!b) return null;
-  // First word of the INN is the most reliable lookup key.
-  return b.generic.split(/[+(]/)[0].trim();
+
+  // Prefer a parenthesised US name when present:
+  // "Paracetamol (Acetaminophen)" -> "Acetaminophen".
+  const paren = b.generic.match(/\(([^)]+)\)/);
+  if (paren) {
+    const inner = paren[1].trim();
+    if (inner && !/^\d/.test(inner)) return inner;
+  }
+
+  const head = b.generic.split(/[+(]/)[0].trim();
+  return USAN_EQUIVALENT[head.toLowerCase()] || head;
 }

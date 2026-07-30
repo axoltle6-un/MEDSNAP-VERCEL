@@ -60,8 +60,16 @@ export const metadata: Metadata = {
     title: "MedSnap AI",
   },
   icons: {
-    icon: "/icon.svg",
-    apple: "/icon.svg",
+    // Browser tab: a simplified capsule-only mark. The full icon's scanner
+    // brackets collapse into noise at 16px, so the favicon drops them.
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16.png", sizes: "16x16", type: "image/png" },
+    ],
+    // Home screen / installed app: the full mark, where the brackets read.
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/favicon-32.png"],
   },
   alternates: {
     canonical: "https://medsnap.app",

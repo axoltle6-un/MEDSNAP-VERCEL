@@ -1,0 +1,15 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Favicon variant: brackets removed. At 16px the scanner corners collapse
+       into noise, so the capsule alone carries the mark. -->
+  <rect width="64" height="64" rx="14" fill="url(#gf)"/>
+  <g transform="rotate(-40 32 32)">
+    <rect x="8" y="21" width="48" height="22" rx="11" fill="#FFFFFF"/>
+    <path d="M32 21 h13 a11 11 0 0 1 0 22 H32 z" fill="#BFDBFE"/>
+    <path d="M32 21 v22" stroke="#1D4ED8" stroke-width="2.5" stroke-opacity="0.5"/>
+  </g>
+  <defs>
+    <linearGradient id="gf" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3B82F6"/><stop offset="0.55" stop-color="#2563EB"/><stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+</svg>

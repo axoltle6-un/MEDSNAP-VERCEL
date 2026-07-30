@@ -1,20 +1,22 @@
 <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="120" height="120" rx="34" fill="url(#medsnap_grad)"/>
-  <path d="M22 42V28C22 25.2386 24.2386 23 27 23H41" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
-  <path d="M79 23H93C95.7614 23 98 25.2386 98 28V42" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
-  <path d="M98 78V92C98 94.7614 95.7614 97 93 97H79" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
-  <path d="M41 97H27C24.2386 97 22 94.7614 22 92V78" stroke="white" stroke-width="5" stroke-linecap="round" stroke-opacity="0.85"/>
-  <g transform="rotate(-45 60 60)">
-    <rect x="30" y="46" width="30" height="28" rx="14" fill="white"/>
-    <rect x="60" y="46" width="30" height="28" rx="14" fill="white" fill-opacity="0.55"/>
-    <line x1="60" y1="46" x2="60" y2="74" stroke="#0D6EFD" stroke-width="2" stroke-opacity="0.4"/>
+  <rect width="120" height="120" rx="27" fill="url(#g)"/>
+  <!-- Scanner brackets: shorter arms, thicker stroke, pushed to the corners
+       so they stay legible when the icon is 16px in a browser tab. -->
+  <g stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-opacity="0.95" fill="none">
+    <path d="M22 40V29C22 25.134 25.134 22 29 22H40"/>
+    <path d="M80 22H91C94.866 22 98 25.134 98 29V40"/>
+    <path d="M98 80V91C98 94.866 94.866 98 91 98H80"/>
+    <path d="M40 98H29C25.134 98 22 94.866 22 91V80"/>
   </g>
-  <path d="M88 28L90 36L98 38L90 40L88 48L86 40L78 38L86 36L88 28Z" fill="#60A5FA"/>
+  <!-- Capsule: larger, so it remains a recognisable pill silhouette when tiny -->
+  <g transform="rotate(-40 60 60)">
+    <rect x="28" y="45" width="64" height="30" rx="15" fill="#FFFFFF"/>
+    <path d="M60 45 a15 15 0 0 1 0 0 h17 a15 15 0 0 1 0 30 H60 z" fill="#BFDBFE"/>
+    <path d="M60 45 v30" stroke="#1D4ED8" stroke-width="3" stroke-opacity="0.45"/>
+  </g>
   <defs>
-    <linearGradient id="medsnap_grad" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2563EB"/>
-      <stop offset="0.5" stop-color="#4F46E5"/>
-      <stop offset="1" stop-color="#0D6EFD"/>
+    <linearGradient id="g" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3B82F6"/><stop offset="0.55" stop-color="#2563EB"/><stop offset="1" stop-color="#4F46E5"/>
     </linearGradient>
   </defs>
 </svg>

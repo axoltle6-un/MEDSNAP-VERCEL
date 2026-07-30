@@ -92,14 +92,14 @@ export function Logo({
             strokeOpacity="0.8"
           />
 
-          {/* Dynamic Capsule Pill (45deg rotation) */}
-          <g transform="rotate(-45 18 16)">
-            {/* Left Cap (Solid Pure White) */}
-            <rect x="9" y="12" width="9" height="8" rx="4" fill="white" />
-            {/* Right Cap (Semi-transparent Electric Blue) */}
-            <rect x="18" y="12" width="9" height="8" rx="4" fill="white" fillOpacity="0.55" />
-            {/* Center Separation Ring */}
-            <line x1="18" y1="12" x2="18" y2="20" stroke="#0D6EFD" strokeWidth="1" strokeOpacity="0.4" />
+          {/* Capsule pill.
+              Drawn as ONE rounded rect with a tinted right half, matching
+              public/icon.svg. Two abutting rects previously read as a pair of
+              overlapping circles rather than a single capsule. */}
+          <g transform="rotate(-40 18 16)">
+            <rect x="7" y="11.5" width="22" height="9" rx="4.5" fill="white" />
+            <path d="M18 11.5 h6.5 a4.5 4.5 0 0 1 0 9 H18 z" fill="#BFDBFE" />
+            <line x1="18" y1="11.5" x2="18" y2="20.5" stroke="#1D4ED8" strokeWidth="1" strokeOpacity="0.45" />
           </g>
 
           {/* AI Sparkle Star (Top Right) */}

@@ -85,10 +85,6 @@ export function AppMain() {
   // Automatic listener for returning Stripe Checkout success redirects
   useStripeSuccess();
 
-  // Mirror the current screen into the address bar (/capture, /browse, ...)
-  // and handle browser Back/Forward.
-  useUrlSync();
-
   let effectiveScreen: Screen = screen;
 
   const isGoogleUser = user?.providerData?.some((p) => p.providerId === "google.com");
@@ -106,6 +102,11 @@ export function AppMain() {
   ) {
     effectiveScreen = "email-verification-gate";
   }
+
+  // Mirror the screen actually being rendered into the address bar
+  // (/capture, /browse, ...) and handle browser Back/Forward. Must use
+  // effectiveScreen so the URL matches what is on screen after auth gating.
+  useUrlSync(effectiveScreen);
 
   const direction = useNavigationDirection(effectiveScreen);
 

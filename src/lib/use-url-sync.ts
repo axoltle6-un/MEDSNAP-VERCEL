@@ -10,21 +10,28 @@ import {
 import type { Screen } from "@/lib/types";
 
 /**
- * Keeps the address bar in sync with the current screen.
+ * Keeps the address bar in sync with the screen actually on display.
  *
  * Three jobs:
  *   1. On first load, adopt the screen implied by the URL, so /capture opens
  *      the capture tab rather than always landing on home.
- *   2. On every screen change, push the matching path so links are shareable
- *      and bookmarkable.
+ *   2. On every screen change, replace the path so links are shareable and
+ *      bookmarkable.
  *   3. Handle browser Back/Forward — previously Back left the app entirely,
  *      which on a PWA-style app feels like a crash.
+ *
+ * IMPORTANT: callers must pass the *effective* screen — the one being
+ * rendered after auth gating — not the raw store value. A logged-out user
+ * clicking through is redirected to "landing", so syncing the raw store
+ * screen would show /capture in the address bar while the landing page is on
+ * screen. The URL must describe what the user is actually looking at.
  *
  * The Zustand store stays the source of truth; the URL is a mirror. That
  * avoids rewriting 19 screens as Next.js routes while still giving real URLs.
  */
-export function useUrlSync() {
-  const screen = useAppStore((s) => s.screen);
+export function useUrlSync(effectiveScreen?: Screen) {
+  const storeScreen = useAppStore((s) => s.screen);
+  const screen = effectiveScreen ?? storeScreen;
   const hydratedRef = React.useRef(false);
   // Set while we're applying a popstate, so the sync effect doesn't push a
   // duplicate entry and fight the browser's own history.
@@ -66,7 +73,15 @@ export function useUrlSync() {
     const path = pathForScreen(screen);
     if (normalisePath(window.location.pathname) === normalisePath(path)) return;
 
-    window.history.pushState({ screen }, "", path);
+    // replaceState, not pushState.
+    //
+    // The store keeps its own navigation history and the in-app back button
+    // reads from that. Pushing here as well would stack two entries per
+    // navigation, so the browser Back button would appear to do nothing on
+    // the first press. Replacing keeps the address bar accurate without
+    // duplicating history; popstate below still handles real Back/Forward
+    // across the entries the browser does own.
+    window.history.replaceState({ screen }, "", path);
   }, [screen]);
 
   // --- 3. Browser Back / Forward -------------------------------------------

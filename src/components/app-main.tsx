@@ -130,24 +130,27 @@ export function AppMain() {
 
   if (isFullscreen) {
     return (
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={effectiveScreen}
-          initial={{ opacity: 0, scale: 0.985, filter: "blur(6px)" }}
-          animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-          exit={{ opacity: 0, scale: 1.008, filter: "blur(6px)" }}
-          // Blur is GPU-expensive on mobile, so keep the fullscreen handoff
-          // brisk and let opacity finish first.
-          transition={{
-            duration: 0.3,
-            ease: EASE,
-            opacity: { duration: 0.2, ease: "easeOut" },
-          }}
-          className="min-h-[100dvh] w-full"
-        >
-          {content}
-        </motion.div>
-      </AnimatePresence>
+      <div className="relative min-h-[100dvh] w-full">
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div
+            key={effectiveScreen}
+            // Animated `filter: blur()` was dropped here. It forces a repaint
+            // of the whole subtree every frame and was the single most
+            // expensive part of this transition on mobile — a scale+fade
+            // reads almost identically and stays on the compositor.
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.012 }}
+            transition={{
+              scale: { type: "spring", stiffness: 400, damping: 34, mass: 0.6 },
+              opacity: { duration: 0.18, ease: "easeOut" },
+            }}
+            className="min-h-[100dvh] w-full"
+          >
+            {content}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     );
   }
 
@@ -155,28 +158,40 @@ export function AppMain() {
   // so the motion matches the mental model of a stack. Slightly larger travel
   // than before, with a subtle depth cue (scale) so screens feel layered
   // rather than sliding on a flat plane.
-  const offset = direction === "back" ? -26 : 26;
+  const offset = direction === "back" ? -28 : 28;
 
   return (
     <AppShell>
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={effectiveScreen}
-          initial={{ opacity: 0, x: offset, scale: 0.994 }}
-          animate={{ opacity: 1, x: 0, scale: 1 }}
-          exit={{ opacity: 0, x: -offset * 0.55, scale: 0.997 }}
-          transition={{
-            // Spring on position for a natural settle, short tween on opacity
-            // so content never lingers half-faded.
-            x: { type: "spring", stiffness: 420, damping: 38, mass: 0.7 },
-            scale: { duration: 0.26, ease: EASE },
-            opacity: { duration: 0.18, ease: "easeOut" },
-          }}
-          className="flex w-full flex-1 flex-col"
-        >
-          {content}
-        </motion.div>
-      </AnimatePresence>
+      {/*
+        mode="popLayout" instead of "wait".
+
+        "wait" serialises the transition: the outgoing screen must finish
+        exiting (180ms) before the incoming one starts (~165ms), so every
+        navigation cost ~345ms AND showed a blank frame in the middle where
+        neither screen was painted. popLayout takes the exiting screen out of
+        layout flow so both animate at once — same easing, roughly half the
+        perceived duration, and no empty gap.
+      */}
+      <div className="relative flex w-full flex-1 flex-col">
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div
+            key={effectiveScreen}
+            initial={{ opacity: 0, x: offset, scale: 0.985 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: -offset * 0.6, scale: 0.99 }}
+            transition={{
+              // Position springs for a natural settle; opacity leads slightly
+              // so the incoming screen is readable before it stops moving.
+              x: { type: "spring", stiffness: 460, damping: 40, mass: 0.6 },
+              scale: { type: "spring", stiffness: 420, damping: 36, mass: 0.6 },
+              opacity: { duration: 0.16, ease: "easeOut" },
+            }}
+            className="flex w-full flex-1 flex-col"
+          >
+            {content}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </AppShell>
   );
 }

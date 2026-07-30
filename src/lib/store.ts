@@ -150,7 +150,13 @@ export const useAppStore = create<AppState>()(
         if (newHistory.length > 20) newHistory.shift();
         set({ screen, screenParams: params, history: newHistory });
         if (typeof window !== "undefined") {
-          window.scrollTo({ top: 0, behavior: "auto" });
+          // Reset scroll on the next frame, not synchronously.
+          //
+          // Scrolling in the same tick as the state change happens while the
+          // outgoing screen is still painted and mid-animation, so the user
+          // sees the old content jump to the top before it fades — reading as
+          // a flicker. Deferring one frame lets the transition own the motion.
+          requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
         }
       },
 
@@ -167,7 +173,7 @@ export const useAppStore = create<AppState>()(
           history: history.slice(0, -1),
         });
         if (typeof window !== "undefined") {
-          window.scrollTo({ top: 0, behavior: "auto" });
+          requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
         }
       },
 

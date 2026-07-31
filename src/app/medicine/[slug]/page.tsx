@@ -7,6 +7,7 @@ import {
   pageTitle,
   pageDescription,
 } from "@/lib/medicine-pages";
+import { getClassInfo } from "@/lib/drug-class-info";
 
 const SITE = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://medsnap.vercel.app"
@@ -77,6 +78,43 @@ export default async function MedicinePage({
   if (!page) notFound();
 
   const url = `${SITE}/medicine/${page.slug}`;
+  const info = getClassInfo(page.drugClass);
+
+  // Questions people actually type. Rendered as visible content AND as
+  // FAQPage schema, which is what makes a page eligible for the expandable
+  // FAQ treatment in search results.
+  const faqs = [
+    {
+      q: `What is ${page.brand} used for?`,
+      a: page.usedFor.length
+        ? `${page.brand} contains ${page.generic}. It is used for: ${page.usedFor.join("; ")}.`
+        : `${page.brand} contains ${page.generic}, a ${page.drugClass || "prescription medicine"}. Check the package insert for the approved indications in ${page.regionLabel}.`,
+    },
+    {
+      q: `How does ${page.brand} work?`,
+      a: info.howItWorks,
+    },
+    {
+      q: `How should I take ${page.brand}?`,
+      a: `${info.howToTake} Always follow the dose on your pack or from your prescriber.`,
+    },
+    {
+      q: `What are the side effects of ${page.brand}?`,
+      a: `Common: ${info.commonSideEffects.join(", ")}. Seek medical advice for: ${info.seriousSideEffects.join("; ")}.`,
+    },
+    {
+      q: `Is ${page.brand} available over the counter in ${page.regionLabel}?`,
+      a: page.otc
+        ? `${page.brand} is generally available without a prescription in ${page.regionLabel}, but a pharmacist can advise whether it suits you.`
+        : `${page.brand} is normally supplied on prescription in ${page.regionLabel}. Speak to a doctor or pharmacist.`,
+    },
+    ...(page.alsoSoldAs.length
+      ? [{
+          q: `What are the alternatives to ${page.brand}?`,
+          a: `Other brands containing the same active ingredient in ${page.regionLabel} include ${page.alsoSoldAs.join(", ")}. They are not always interchangeable — check with a pharmacist.`,
+        }]
+      : []),
+  ];
 
   // Drug schema, so the page is eligible for rich results. Only fields we
   // genuinely hold are emitted — no invented ratings or clinical claims.
@@ -101,6 +139,15 @@ export default async function MedicinePage({
           ? "OTC"
           : "PrescriptionOnly",
         url,
+      },
+      {
+        "@type": "FAQPage",
+        "@id": `${url}#faq`,
+        mainEntity: faqs.map((f) => ({
+          "@type": "Question",
+          name: f.q,
+          acceptedAnswer: { "@type": "Answer", text: f.a },
+        })),
       },
       {
         "@type": "BreadcrumbList",
@@ -185,6 +232,65 @@ export default async function MedicinePage({
         </dl>
       </section>
 
+      <section className="mb-8">
+        <h2 className="mb-3 text-xl font-bold">How does {page.brand} work?</h2>
+        <p className="text-sm leading-relaxed text-muted-foreground">{info.howItWorks}</p>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xl font-bold">How to take {page.brand}</h2>
+        <p className="text-sm leading-relaxed text-muted-foreground">{info.howToTake}</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          Always follow the dose printed on your pack or given by your
+          prescriber — it can differ from the general guidance above.
+        </p>
+      </section>
+
+      <section className="mb-8 grid gap-4 sm:grid-cols-2">
+        <div className="rounded-2xl border border-border/60 bg-card p-4">
+          <h2 className="mb-2 text-base font-bold">Common side effects</h2>
+          <ul className="space-y-1.5">
+            {info.commonSideEffects.map((x, i) => (
+              <li key={i} className="text-sm text-muted-foreground">• {x}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="rounded-2xl border border-danger/30 bg-danger-soft/30 p-4">
+          <h2 className="mb-2 text-base font-bold text-danger">Seek medical advice</h2>
+          <ul className="space-y-1.5">
+            {info.seriousSideEffects.map((x, i) => (
+              <li key={i} className="text-sm text-muted-foreground">• {x}</li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xl font-bold">Who should be careful with {page.brand}?</h2>
+        <ul className="space-y-2">
+          {info.cautions.map((x, i) => (
+            <li key={i} className="flex gap-2 text-sm leading-relaxed text-muted-foreground">
+              <span className="text-warn">•</span><span>{x}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="mb-8">
+        <h2 className="mb-3 text-xl font-bold">{page.brand} interactions</h2>
+        <ul className="space-y-2">
+          {info.interactions.map((x, i) => (
+            <li key={i} className="flex gap-2 text-sm leading-relaxed text-muted-foreground">
+              <span className="text-primary">•</span><span>{x}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2 text-xs text-muted-foreground">
+          This is not a complete list. Tell your pharmacist about every medicine
+          and supplement you take.
+        </p>
+      </section>
+
       {page.composition && (
         <section className="mb-8">
           <h2 className="mb-3 text-xl font-bold">Composition</h2>
@@ -210,6 +316,20 @@ export default async function MedicinePage({
           </div>
         </section>
       )}
+
+      <section className="mb-8">
+        <h2 className="mb-4 text-xl font-bold">
+          Frequently asked questions about {page.brand}
+        </h2>
+        <div className="space-y-4">
+          {faqs.map((f, i) => (
+            <div key={i} className="rounded-xl border border-border/60 bg-card p-4">
+              <h3 className="text-sm font-bold">{f.q}</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{f.a}</p>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="mb-8 rounded-2xl border border-border bg-card p-5">
         <h2 className="mb-2 text-lg font-bold">Identify this medicine from a photo</h2>

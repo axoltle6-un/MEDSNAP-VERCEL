@@ -192,48 +192,6 @@ export default function RootLayout({
         ],
       },
       {
-        "@type": "FAQPage",
-        "@id": "https://medsnap.vercel.app/#faq",
-        "mainEntity": [
-          {
-            "@type": "Question",
-            "name": "How do I identify a pill by taking a photo?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text":
-                "Simply open MedSnap AI on your mobile browser or app, click 'Scan a medicine', and take a clear picture of the pill, capsule, or prescription box label. MedSnap AI extracts text, imprint codes, shape, and colors to match against official drug registries.",
-            },
-          },
-          {
-            "@type": "Question",
-            "name": "Which official drug databases does MedSnap search?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text":
-                "MedSnap cross-references live data directly from US openFDA, NIH RxNorm, NIH DailyMed, PubChem, DRAP (Drug Regulatory Authority of Pakistan), and NMPA (National Medical Products Administration China).",
-            },
-          },
-          {
-            "@type": "Question",
-            "name": "Can MedSnap check for drug-drug interactions and user allergies?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text":
-                "Yes. MedSnap features an active Interaction Radar and Side-by-Side Comparison Matrix that checks active formula ingredients against your recorded allergy profile and flags potential double-dosing or contraindications.",
-            },
-          },
-          {
-            "@type": "Question",
-            "name": "Is MedSnap AI free to use?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text":
-                "Yes, MedSnap provides free daily camera scans and unlimited text database lookups across all global medical registries.",
-            },
-          },
-        ],
-      },
-      {
         "@type": "Organization",
         "@id": "https://medsnap.vercel.app/#organization",
         "name": "MedSnap AI Health Tech",

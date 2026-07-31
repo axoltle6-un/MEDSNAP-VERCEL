@@ -24,6 +24,38 @@
  * and it doubles as a description for screen readers before hydration.
  */
 
+
+/**
+ * Homepage FAQ schema.
+ *
+ * Previously declared in the root layout, which renders on EVERY route — so
+ * it was injected onto all 158 /medicine/[slug] pages and competed with each
+ * page's own FAQPage. Scoped here so it applies to the homepage only, which
+ * is the page whose visible FAQ text it actually describes.
+ */
+const HOME_FAQ = [
+  {
+    q: "How do I identify a pill from a picture?",
+    a: "Open the Capture tab, photograph the pill or its packaging, and MedSnap returns the brand name, generic ingredient, strength, and a full medical report verified against government drug databases.",
+  },
+  {
+    q: "Can MedSnap identify a pill with no markings?",
+    a: "Yes. Search by colour, shape, and imprint code in the Browse tab, or photograph the packaging instead of the tablet.",
+  },
+  {
+    q: "Is MedSnap free?",
+    a: "Browsing and searching verified medicine databases is free. AI photo identification includes one free scan per day; MedSnap Pro raises this to four daily scans and adds allergy alerts and medical report exports.",
+  },
+  {
+    q: "Does MedSnap work for medicines sold in Pakistan?",
+    a: "Yes. MedSnap covers DRAP-registered Pakistani brands including Rigix, Myteka, Risek, Panadol and Arinac, mapping each to its international generic name so clinical data can be verified against openFDA and RxNorm.",
+  },
+  {
+    q: "Is MedSnap a substitute for a doctor or pharmacist?",
+    a: "No. MedSnap is an information tool. Always confirm any medicine with a qualified pharmacist or doctor before taking it.",
+  },
+];
+
 export function CrawlableContent() {
   return (
     <div className="sr-only" aria-hidden="false" data-seo-content>
@@ -77,6 +109,21 @@ export function CrawlableContent() {
         scanned medicine contains an ingredient you react to, or interacts with
         something you already take.
       </p>
+
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: HOME_FAQ.map((f) => ({
+              "@type": "Question",
+              name: f.q,
+              acceptedAnswer: { "@type": "Answer", text: f.a },
+            })),
+          }),
+        }}
+      />
 
       <h2>Frequently asked questions</h2>
 

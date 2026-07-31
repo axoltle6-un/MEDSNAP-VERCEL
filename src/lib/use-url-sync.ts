@@ -73,15 +73,18 @@ export function useUrlSync(effectiveScreen?: Screen) {
     const path = pathForScreen(screen);
     if (normalisePath(window.location.pathname) === normalisePath(path)) return;
 
-    // replaceState, not pushState.
+    // pushState, so each screen becomes a real browser history entry.
     //
-    // The store keeps its own navigation history and the in-app back button
-    // reads from that. Pushing here as well would stack two entries per
-    // navigation, so the browser Back button would appear to do nothing on
-    // the first press. Replacing keeps the address bar accurate without
-    // duplicating history; popstate below still handles real Back/Forward
-    // across the entries the browser does own.
-    window.history.replaceState({ screen }, "", path);
+    // This previously used replaceState, on the mistaken reasoning that the
+    // store's own history made a second entry redundant. It does not:
+    // replacing OVERWRITES the current entry, so navigating
+    // dashboard -> browse left a single-entry stack and the browser Back
+    // button had nowhere to go — it exited the app entirely.
+    //
+    // Pushing gives Back the behaviour users expect (browse -> dashboard).
+    // The popstate handler below turns that into a store update, and the
+    // applyingPopRef guard stops it pushing a duplicate on the way back.
+    window.history.pushState({ screen }, "", path);
   }, [screen]);
 
   // --- 3. Browser Back / Forward -------------------------------------------

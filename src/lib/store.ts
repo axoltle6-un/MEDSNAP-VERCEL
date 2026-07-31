@@ -155,6 +155,18 @@ export const useAppStore = create<AppState>()(
       },
 
       goBack: () => {
+        // Prefer the browser's history when the app is URL-synced.
+        //
+        // Setting the screen directly here makes use-url-sync PUSH a new
+        // entry, so the in-app back arrow grew the history stack instead of
+        // unwinding it — after using it, browser Back went "forward" to the
+        // screen you had just left. Calling history.back() instead keeps a
+        // single stack, and the popstate handler updates the store.
+        if (typeof window !== "undefined" && window.history.state?.screen && window.history.length > 1) {
+          window.history.back();
+          return;
+        }
+
         const { history } = get();
         if (history.length === 0) {
           set({ screen: "home", screenParams: {} });

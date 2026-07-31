@@ -156,7 +156,21 @@ export async function resolveGeneric(query: string): Promise<string | null> {
     }
   }
 
-  // 2. RxNorm approximate match — spelling-tolerant, handles OCR noise.
+  // 2. Bulk index — 22.9k openFDA + RxNorm names. An exact hit means this IS
+  //    a real medicine, so hand the canonical spelling to the .gov lookups
+  //    rather than whatever the user typed or OCR produced.
+  try {
+    const { findBulkMedicine } = await import("@/lib/bulk-medicines");
+    const hit = findBulkMedicine(query);
+    if (hit) {
+      cache.set(key, hit.n);
+      return hit.n;
+    }
+  } catch {
+    /* index unavailable — fall through */
+  }
+
+  // 3. RxNorm approximate match — spelling-tolerant, handles OCR noise.
   try {
     const url =
       `https://rxnav.nlm.nih.gov/REST/approximateTerm.json` +

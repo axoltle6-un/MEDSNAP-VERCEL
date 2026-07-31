@@ -19,6 +19,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/api/auth/", "/api/stripe/"],
       },
     ],
-    sitemap: "https://medsnap.app/sitemap.xml",
+    sitemap: "https://medsnap.vercel.app/sitemap.xml",
   };
 }

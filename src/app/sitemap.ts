@@ -1,7 +1,7 @@
 import { MetadataRoute } from "next";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = "https://medsnap.app";
+  const baseUrl = "https://medsnap.vercel.app";
   const lastModified = new Date();
 
   return [

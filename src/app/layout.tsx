@@ -22,7 +22,7 @@ const bricolage = Bricolage_Grotesque({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://medsnap.app"),
+  metadataBase: new URL("https://medsnap.vercel.app"),
   title: {
     default: "MedSnap AI — Instant Medicine & Pill Identifier by Picture",
     template: "%s | MedSnap AI",
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
     "allergy warning radar",
     "medication safety app",
   ],
-  authors: [{ name: "MedSnap AI", url: "https://medsnap.app" }],
+  authors: [{ name: "MedSnap AI", url: "https://medsnap.vercel.app" }],
   creator: "MedSnap AI",
   publisher: "MedSnap AI Health Tech",
   category: "medical",
@@ -72,20 +72,20 @@ export const metadata: Metadata = {
     shortcut: ["/favicon-32.png"],
   },
   alternates: {
-    canonical: "https://medsnap.app",
+    canonical: "https://medsnap.vercel.app",
     languages: {
-      "en-US": "https://medsnap.app",
-      "es-ES": "https://medsnap.app/?lang=es",
-      "fr-FR": "https://medsnap.app/?lang=fr",
-      "de-DE": "https://medsnap.app/?lang=de",
-      "ar-SA": "https://medsnap.app/?lang=ar",
+      "en-US": "https://medsnap.vercel.app",
+      "es-ES": "https://medsnap.vercel.app/?lang=es",
+      "fr-FR": "https://medsnap.vercel.app/?lang=fr",
+      "de-DE": "https://medsnap.vercel.app/?lang=de",
+      "ar-SA": "https://medsnap.vercel.app/?lang=ar",
     },
   },
   openGraph: {
     title: "MedSnap AI — Instant Medicine & Pill Identifier by Picture",
     description:
       "Snap a photo of any pill, capsule, or package to identify it instantly. Cross-checked live with openFDA, RxNorm, DRAP, and NMPA registries.",
-    url: "https://medsnap.app",
+    url: "https://medsnap.vercel.app",
     siteName: "MedSnap AI",
     locale: "en_US",
     type: "website",
@@ -138,9 +138,9 @@ export default function RootLayout({
     "@graph": [
       {
         "@type": "WebApplication",
-        "@id": "https://medsnap.app/#webapp",
+        "@id": "https://medsnap.vercel.app/#webapp",
         "name": "MedSnap AI Medicine Identifier",
-        "url": "https://medsnap.app",
+        "url": "https://medsnap.vercel.app",
         "applicationCategory": "HealthApplication",
         "operatingSystem": "Web, Android, iOS",
         "description":
@@ -168,9 +168,9 @@ export default function RootLayout({
       },
       {
         "@type": "MedicalWebPage",
-        "@id": "https://medsnap.app/#medicalpage",
+        "@id": "https://medsnap.vercel.app/#medicalpage",
         "name": "MedSnap AI Pill & Medicine Database Search",
-        "url": "https://medsnap.app",
+        "url": "https://medsnap.vercel.app",
         "medicalSpecialty": ["ClinicalPharmacology", "GeneralPractice"],
         "medicalAudience": [
           {
@@ -192,7 +192,7 @@ export default function RootLayout({
       },
       {
         "@type": "FAQPage",
-        "@id": "https://medsnap.app/#faq",
+        "@id": "https://medsnap.vercel.app/#faq",
         "mainEntity": [
           {
             "@type": "Question",
@@ -234,10 +234,10 @@ export default function RootLayout({
       },
       {
         "@type": "Organization",
-        "@id": "https://medsnap.app/#organization",
+        "@id": "https://medsnap.vercel.app/#organization",
         "name": "MedSnap AI Health Tech",
-        "url": "https://medsnap.app",
-        "logo": "https://medsnap.app/logo.svg",
+        "url": "https://medsnap.vercel.app",
+        "logo": "https://medsnap.vercel.app/logo.svg",
         "sameAs": ["https://github.com/axoltle6-un/MEDSNAP-VERCEL"],
       },
     ],

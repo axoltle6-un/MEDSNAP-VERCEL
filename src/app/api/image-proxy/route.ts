@@ -6,6 +6,9 @@ export const maxDuration = 10;
 /** Allowed domains for image proxy — prevents SSRF attacks while supporting medical & encyclopedic images */
 const ALLOWED_DOMAINS = [
   "upload.wikimedia.org",
+  // PubChem serves the 2D structure diagrams used on /medicine pages.
+  // Without this the 50 structure images would 403 at the proxy.
+  "pubchem.ncbi.nlm.nih.gov",
   "commons.wikimedia.org",
   "en.wikipedia.org",
   "wikimedia.org",

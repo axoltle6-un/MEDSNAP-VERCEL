@@ -8,6 +8,7 @@ import {
   pageDescription,
 } from "@/lib/medicine-pages";
 import { getClassInfo } from "@/lib/drug-class-info";
+import { getMedicineImageFor, proxiedImageUrl } from "@/lib/medicine-images";
 
 const SITE = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://medsnap.vercel.app"
@@ -79,6 +80,7 @@ export default async function MedicinePage({
 
   const url = `${SITE}/medicine/${page.slug}`;
   const info = getClassInfo(page.drugClass);
+  const image = getMedicineImageFor(page.brand);
 
   // Questions people actually type. Rendered as visible content AND as
   // FAQPage schema, which is what makes a page eligible for the expandable
@@ -138,6 +140,7 @@ export default async function MedicinePage({
         prescriptionStatus: page.otc
           ? "OTC"
           : "PrescriptionOnly",
+        ...(image ? { image: image.u } : {}),
         url,
       },
       {
@@ -191,6 +194,31 @@ export default async function MedicinePage({
             </span>
           )}
         </div>
+
+        {image && (
+          <figure className="mb-5 overflow-hidden rounded-2xl border border-border bg-white p-4">
+            {/* Plain <img>: these are remote hosts and the page is statically
+                prerendered, so next/image would add a runtime optimiser hop
+                for no benefit. width/height prevent layout shift (CLS). */}
+            <img
+              src={proxiedImageUrl(image.u)}
+              alt={
+                image.t === "product"
+                  ? `${page.brand} (${page.generic}) packaging or tablets`
+                  : `Chemical structure of ${page.generic}, the active ingredient in ${page.brand}`
+              }
+              width={400}
+              height={300}
+              loading="eager"
+              className="mx-auto h-auto max-h-56 w-auto object-contain"
+            />
+            <figcaption className="mt-3 text-center text-xs text-muted-foreground">
+              {image.t === "product"
+                ? `${page.brand} — image via Wikimedia Commons`
+                : `2D chemical structure of ${page.generic.split(/[+(]/)[0].trim()} — via NIH PubChem`}
+            </figcaption>
+          </figure>
+        )}
 
         <h1 className="font-display text-3xl font-extrabold tracking-tight">
           {page.brand}

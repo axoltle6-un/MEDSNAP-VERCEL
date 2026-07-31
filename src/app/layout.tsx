@@ -150,13 +150,14 @@ export default function RootLayout({
           "price": "0",
           "priceCurrency": "USD",
         },
-        "aggregateRating": {
-          "@type": "AggregateRating",
-          "ratingValue": "4.9",
-          "ratingCount": "1280",
-          "bestRating": "5",
-          "worstRating": "1",
-        },
+        // aggregateRating intentionally omitted.
+        //
+        // This previously declared 4.9 from 1,280 ratings. No review system
+        // in this app produced those numbers. Google's structured-data
+        // policy treats invented ratings as spam and can trigger a site-wide
+        // manual action, which would cost far more visibility than star
+        // snippets gain. Reinstate only when backed by genuine,
+        // user-visible reviews.
         "featureList": [
           "Multi-Modal AI Vision Pill Scanner",
           "openFDA & RxNorm Government Registry Lookups",

@@ -59,6 +59,7 @@ import { ZoomPanViewer } from "@/components/medicine/zoom-pan-viewer";
 import { SideBySideCompare } from "@/components/medicine/side-by-side-compare";
 import { AnnotationModal } from "@/components/medicine/annotation-modal";
 import { getTranslation, translateMedicalText } from "@/lib/translations";
+import { formatStorage } from "@/lib/units";
 
 export function ResultsScreen() {
   const navigate = useAppStore((s) => s.navigate);
@@ -70,6 +71,15 @@ export function ResultsScreen() {
   const setActiveDetailSection = useAppStore((s) => s.setActiveDetailSection);
   const allergies = useAppStore((s) => s.profile.allergies) ?? [];
   const lang = useAppStore((s) => s.settings.language);
+  // Accessibility setting — see the warning block below. Previously exposed in
+  // Settings but read by nothing, so the toggle did nothing at all.
+  const highContrast = useAppStore((s) => s.settings.highContrastWarnings);
+  // Whether to repeat the medical disclaimer on each scan result. Also
+  // previously read by nothing.
+  const showDisclaimer = useAppStore((s) => s.settings.showDisclaimerOnScan);
+  // Metric/imperial preference. Only affects storage temperatures — drug
+  // strengths are metric worldwide and must never be converted.
+  const units = useAppStore((s) => s.settings.units);
 
   const [reportOpen, setReportOpen] = React.useState(false);
   const [lightboxOpen, setLightboxOpen] = React.useState(false);
@@ -460,16 +470,26 @@ export function ResultsScreen() {
           transition={{ delay: 0.1, duration: 0.3 }}
           className={cn(
             "rounded-2xl border-2 p-4 shadow-soft",
-            allergyHits.length > 0
-              ? "border-danger/40 bg-danger-soft/70"
-              : "border-warn/40 bg-warn-soft/70"
+            // High-contrast mode makes the warning solid rather than tinted,
+            // for users who cannot reliably distinguish a soft background.
+            highContrast
+              ? allergyHits.length > 0
+                ? "border-danger bg-danger text-white [&_*]:text-white"
+                : "border-warn bg-warn text-white [&_*]:text-white"
+              : allergyHits.length > 0
+                ? "border-danger/40 bg-danger-soft/70"
+                : "border-warn/40 bg-warn-soft/70"
           )}
         >
           <div className="flex items-start gap-2.5">
             <ShieldAlert
               className={cn(
                 "mt-0.5 h-5 w-5 shrink-0",
-                allergyHits.length > 0 ? "text-danger" : "text-warn"
+                highContrast
+                  ? "text-white"
+                  : allergyHits.length > 0
+                    ? "text-danger"
+                    : "text-warn"
               )}
             />
             <div className="flex-1">
@@ -656,7 +676,7 @@ export function ResultsScreen() {
       <ReportSection
         title={getTranslation(lang, "storageInstructions")}
         icon={Thermometer}
-        items={[translateMedicalText(result.storageInstructions, lang)]}
+        items={[formatStorage(translateMedicalText(result.storageInstructions, lang), units)]}
         onExpand={() => {
           setActiveDetailSection("storage");
           navigate("result-detail");
@@ -672,7 +692,10 @@ export function ResultsScreen() {
         />
       )}
 
-      {/* Disclaimer footer */}
+      {/* Disclaimer footer — controlled by Settings > Show disclaimer on scan.
+          The permanent legal disclaimer still lives in Settings > Legal, so
+          hiding this repetition does not remove the disclaimer from the app. */}
+      {showDisclaimer && (
       <div className="rounded-2xl bg-muted/60 p-4 text-xs text-muted-foreground">
         <div className="mb-1 flex items-center gap-1.5 font-semibold text-foreground">
           <ClipboardList className="h-3.5 w-3.5" />
@@ -682,6 +705,7 @@ export function ResultsScreen() {
         professional medical advice. Always consult a doctor or pharmacist before
         starting, stopping, or changing any medication.
       </div>
+      )}
 
       {/* Sticky Bottom Floating Action Bar */}
       <div className="sticky bottom-4 z-30 mx-auto flex w-full max-w-lg items-center justify-between gap-3 rounded-2xl border border-border/80 bg-white/90 p-3 shadow-lifted backdrop-blur-xl">

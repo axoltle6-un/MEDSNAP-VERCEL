@@ -29,6 +29,7 @@ import {
   ShieldAlert,
   Gift,
   AlertCircle,
+  ClipboardList,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import {
@@ -183,10 +184,20 @@ export function SettingsScreen() {
       <CancellationDialog
         open={cancelDialogOpen}
         onOpenChange={setCancelDialogOpen}
-        onConfirmCancel={() => {
+        onConfirmCancel={async () => {
+          // Local-only deactivation is not a cancellation.
+          //
+          // isPro is now reconciled from the server document on every sign-in
+          // (see store.syncFromCloud), so clearing it client-side alone means
+          // Pro silently returns next time the user logs in — and their card
+          // keeps being charged. Tell them the truth about what happened.
           deactivatePro();
-          toast.info("Pro subscription canceled.");
           setCancelDialogOpen(false);
+          toast.info("Pro features turned off on this device.", {
+            description:
+              "Billing is managed by Stripe — email support to stop future charges.",
+            duration: 8000,
+          });
         }}
       />
 
@@ -375,6 +386,47 @@ export function SettingsScreen() {
           <p className="px-1 pt-1 text-xs text-muted-foreground">
             All scan history is linked securely to your account. Photos are analyzed securely by AI models and discarded after scanning.
           </p>
+          {/* Export before delete — GDPR data portability, and it would be
+              poor form to offer permanent deletion with no way to keep a copy. */}
+          <button
+            onClick={() => {
+              if (!scans.length) {
+                toast.info("No scans to export yet.");
+                return;
+              }
+              const payload = {
+                exportedAt: new Date().toISOString(),
+                app: "MedSnap",
+                scanCount: scans.length,
+                scans: scans.map((sc) => ({
+                  date: new Date(sc.createdAt).toISOString(),
+                  brandName: sc.medicine?.brandName,
+                  genericName: sc.medicine?.genericName,
+                  strength: sc.medicine?.strengthDisplay,
+                  form: sc.medicine?.form,
+                  manufacturer: sc.medicine?.manufacturer,
+                  usedFor: sc.medicine?.usedFor,
+                  source: sc.source,
+                  notes: sc.notes,
+                })),
+              };
+              const blob = new Blob([JSON.stringify(payload, null, 2)], {
+                type: "application/json",
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `medsnap-history-${new Date().toISOString().slice(0, 10)}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+              toast.success(`Exported ${scans.length} scan${scans.length === 1 ? "" : "s"}`);
+            }}
+            className="flex w-full items-center gap-2 rounded-xl border border-border bg-card p-3 text-left text-sm font-medium transition-colors hover:bg-muted"
+          >
+            <ClipboardList className="h-4 w-4 text-muted-foreground" />
+            Export scan history
+          </button>
+
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <button className="flex w-full items-center gap-2 rounded-xl border border-danger/30 bg-danger-soft/40 p-3 text-left text-sm font-medium text-danger transition-colors hover:bg-danger-soft/70">
@@ -591,27 +643,33 @@ function CancellationDialog({
             </div>
 
             <div>
-              <h3 className="font-bold text-lg">Wait! Take 20% Off</h3>
+              <h3 className="font-bold text-lg">Before you go</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                We'd love to keep you! Claim 20% off your next renewal cycle automatically.
+                You'll keep unlimited AI scans, allergy alerts and medical exports for the rest of your billing period.
               </p>
             </div>
 
             <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4">
               <p className="text-xs font-semibold text-primary">Special Retention Offer</p>
               <p className="mt-1 font-mono text-xl font-bold tracking-widest text-foreground">STAYPRO20</p>
-              <p className="mt-1 text-[11px] text-muted-foreground">Applies 20% discount to your current plan</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Your plan continues unchanged</p>
             </div>
 
             <div className="flex flex-col gap-2 pt-2">
               <Button
                 onClick={() => {
-                  toast.success("Retention offer applied! Your 20% discount is active.");
+                  // Was: toast claiming "Your 20% discount is active."
+                  // No discount was ever applied — no Stripe coupon, no state
+                  // change, nothing. Telling a paying customer they received a
+                  // discount they did not receive is not a UX shortcut, it is
+                  // a false statement about their billing. Keeps the retention
+                  // step but states plainly what happens.
+                  toast.success("Great — your Pro subscription stays active.");
                   onOpenChange(false);
                 }}
                 className="h-12 w-full rounded-xl font-bold shadow-glow"
               >
-                Claim 20% Off & Keep Pro
+                Keep my Pro subscription
               </Button>
               <Button
                 onClick={() => setStep(3)}

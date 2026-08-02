@@ -77,7 +77,17 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://cdn.jsdelivr.net https://unpkg.com https://www.gstatic.com https://www.googleapis.com https://apis.google.com https://js.stripe.com",
+              // 'unsafe-eval' removed — it permits eval()/new Function() on ANY
+            // string, which turns a single injection into arbitrary script
+            // execution. The only real need here is tesseract.js compiling its
+            // WASM core, and that is covered by 'wasm-unsafe-eval', which
+            // allows WebAssembly compilation and nothing else.
+            //
+            // 'unsafe-inline' is retained for now: Next.js emits inline
+            // bootstrap scripts and removing it requires nonce plumbing
+            // through the App Router. Tracked separately — dropping
+            // 'unsafe-eval' already closes the larger class of attack.
+            "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob: https://cdn.jsdelivr.net https://unpkg.com https://www.gstatic.com https://www.googleapis.com https://apis.google.com https://js.stripe.com",
               "worker-src 'self' blob:",
               "child-src 'self' blob: https://accounts.google.com https://*.firebaseapp.com https://*.firebase.com https://js.stripe.com https://checkout.stripe.com",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
